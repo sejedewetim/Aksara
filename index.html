@@ -467,6 +467,10 @@ var DEMO_DB = {
             if (!window.firebase) throw new Error('Firebase SDK belum termuat.');
             AKSARA_FIREBASE.app = firebase.apps.length ? firebase.app() : firebase.initializeApp(AKSARA_FIREBASE_CONFIG);
             AKSARA_FIREBASE.auth = AKSARA_FIREBASE.app.auth();
+            // Sesi Firebase harus tetap hidup saat halaman di-refresh atau dibuka kembali.
+            try { await AKSARA_FIREBASE.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); } catch (e) {
+                console.warn('[AKSARA Firebase Auth] Persistence LOCAL gagal, Firebase akan memakai persistence bawaan.', e);
+            }
             AKSARA_FIREBASE.db = AKSARA_FIREBASE.app.database();
             AKSARA_FIREBASE.ready = true;
             return AKSARA_FIREBASE;
@@ -593,13 +597,27 @@ var DEMO_DB = {
                 window.dispatchEvent(new CustomEvent('aksara:firebase-status',{detail:{connected:false,error:e.message}}));
             }
         };
-        // Firebase is an additional synchronization layer; existing local login and app logic remain unchanged.
+        // Firebase adalah sumber data pusat. Sinkronisasi dimulai otomatis ketika sesi Auth tersedia.
+        // Tidak bergantung pada halaman login: refresh di dashboard tetap mempertahankan sesi dan data.
         aksaraFbInstall();
         aksaraFbReady().then(() => {
-            // Pulihkan sinkronisasi otomatis setelah refresh/perangkat baru ketika sesi Firebase masih aktif.
-            if (AKSARA_FIREBASE.auth?.currentUser) {
-                aksaraFbStart().catch(e => console.warn('[AKSARA Firebase auto-start]', e));
+            const startForFirebaseUser = async (firebaseUser) => {
+                if (!firebaseUser) return;
+                try {
+                    await aksaraFbStart();
+                    window.dispatchEvent(new CustomEvent('aksara:firebase-auth-ready', { detail: { uid: firebaseUser.uid, email: firebaseUser.email || '' } }));
+                } catch (e) {
+                    console.warn('[AKSARA Firebase auto-sync]', e);
+                    window.dispatchEvent(new CustomEvent('aksara:firebase-error', { detail: { error: e } }));
+                }
+            };
+            // onAuthStateChanged penting untuk perangkat baru dan refresh: Firebase mengembalikan sesi lokalnya sendiri.
+            if (AKSARA_FIREBASE.auth && typeof AKSARA_FIREBASE.auth.onAuthStateChanged === 'function') {
+                AKSARA_FIREBASE.auth.onAuthStateChanged(user => {
+                    if (user) startForFirebaseUser(user);
+                });
             }
+            if (AKSARA_FIREBASE.auth?.currentUser) startForFirebaseUser(AKSARA_FIREBASE.auth.currentUser);
         }).catch(e => console.warn('[AKSARA Firebase SDK]', e));
 
 var mockApiService = {
@@ -7373,8 +7391,37 @@ if ('serviceWorker' in navigator) {
                     try {
                         const parsedUser = JSON.parse(storedUser);
                         mockApiService.getDashboardData(storedToken, parsedUser.role)
-                            .then(() => { const canonicalUser = hydrateStudentAccount(parsedUser); setUser(canonicalUser); setToken(storedToken); })
-                            .catch(() => handleLogout())
+                            .then(() => {
+                                const canonicalUser = hydrateStudentAccount(parsedUser);
+                                setUser(canonicalUser);
+                                setToken(storedToken);
+                                // Pertahankan halaman terakhir setelah refresh.
+                                if (canonicalUser.role === 'ADMIN_SUPER') setRoute('admin/dashboard');
+                                else if (canonicalUser.role === 'GURU') setRoute('guru/dashboard');
+                                else if (canonicalUser.role === 'MURID') setRoute('murid/dashboard');
+                                else if (canonicalUser.role === 'ORANG_TUA') setRoute('orangtua/dashboard');
+                                else setRoute('landing');
+                                // Pastikan sinkronisasi cloud dipicu juga setelah sesi aplikasi dipulihkan.
+                                if (typeof aksaraFbStart === 'function') aksaraFbStart().catch(e => console.warn('[AKSARA] Pemulihan Firebase setelah refresh:', e));
+                            })
+                            .catch(() => {
+                                // Token aplikasi lokal bukan sumber autentikasi cloud. Jangan logout hanya karena
+                                // dashboard mock gagal; Firebase Auth menjadi sumber sesi/data lintas perangkat.
+                                try {
+                                    const firebaseUser = AKSARA_FIREBASE.auth?.currentUser;
+                                    if (firebaseUser) {
+                                        const canonicalUser = hydrateStudentAccount(parsedUser);
+                                        setUser(canonicalUser);
+                                        setToken(storedToken);
+                                        if (canonicalUser.role === 'ADMIN_SUPER') setRoute('admin/dashboard');
+                                        else if (canonicalUser.role === 'GURU') setRoute('guru/dashboard');
+                                        else if (canonicalUser.role === 'MURID') setRoute('murid/dashboard');
+                                        else if (canonicalUser.role === 'ORANG_TUA') setRoute('orangtua/dashboard');
+                                    } else {
+                                        handleLogout();
+                                    }
+                                } catch (e) { handleLogout(); }
+                            })
                             .finally(() => setIsCheckingAuth(false));
                     } catch (e) {
                         setIsCheckingAuth(false);
