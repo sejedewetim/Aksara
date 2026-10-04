@@ -471,12 +471,24 @@ var DEMO_DB = {
             AKSARA_FIREBASE.ready = true;
             return AKSARA_FIREBASE;
         };
+        const AKSARA_FIREBASE_PENDING_WRITES = new Set();
         const aksaraFbWrite = async key => {
-            if (!AKSARA_FIREBASE.ready || AKSARA_FIREBASE.applying) return;
+            AKSARA_FIREBASE_PENDING_WRITES.add(key);
+            if (!AKSARA_FIREBASE.ready || AKSARA_FIREBASE.applying || !AKSARA_FIREBASE.auth?.currentUser) return false;
             try {
                 const value = key === 'systemHealth' ? aksaraFbSafe(DEMO_DB[key] || {}) : aksaraFbMap(key, DEMO_DB[key] || []);
                 await AKSARA_FIREBASE.db.ref(key).set(value);
-            } catch(e) { console.warn('[AKSARA Firebase write]', key, e); }
+                AKSARA_FIREBASE_PENDING_WRITES.delete(key);
+                return true;
+            } catch(e) {
+                console.warn('[AKSARA Firebase write]', key, e);
+                return false;
+            }
+        };
+        const aksaraFbFlushPendingWrites = async () => {
+            if (!AKSARA_FIREBASE.auth?.currentUser) return;
+            const keys = Array.from(AKSARA_FIREBASE_PENDING_WRITES);
+            for (const key of keys) await aksaraFbWrite(key);
         };
         const aksaraFbWrap = (value,key) => {
             if (!value || typeof value !== 'object' || value.__aksaraFbProxy) return value;
@@ -547,56 +559,34 @@ var DEMO_DB = {
                 AKSARA_FIREBASE_SYNC_KEYS.forEach(key=>{
                     AKSARA_FIREBASE.db.ref(key).on('value',snp=>{
                         const value=snp.val();
-                        // Firebase adalah sumber sinkronisasi, bukan alasan untuk menghapus data lokal yang lebih lengkap.
+                        // Firebase adalah sumber data utama. Cache browser hanya dipakai ketika Firebase belum memiliki data.
+                        // Setelah node Firebase tersedia, jangan menggabungkan cache lama kembali ke cloud karena dapat menimpa perubahan dari perangkat lain.
                         if (key !== 'systemHealth') {
+                            const remoteRows = value && typeof value === 'object' ? aksaraFbArray(value) : [];
+                            if (remoteRows.length > 0) {
+                                aksaraFbApply(key, remoteRows);
+                                return;
+                            }
+                            // Node kosong: hanya isi dari cache lokal jika Firebase memang belum mempunyai data.
                             try {
-                                const localMain = readLocalCollection(key);
-                                const localCache = readLocalCollection(`firebase_${key}`);
-                                const remoteRows = value && typeof value === 'object' ? aksaraFbArray(value) : [];
-                                const combined = [...remoteRows, ...localMain, ...localCache];
-                                const unique = [];
-                                const seen = new Set();
-                                combined.forEach(item => {
-                                    if (!item || typeof item !== 'object') return;
-                                    const id = String(item.id || item.userId || item.studentId || item.teacherId || item.parentId || item.scheduleId || item.questionId || item.attemptId || item.nisn || item.username || item.name || JSON.stringify(item)).trim().toLowerCase();
-                                    if (seen.has(id)) return;
-                                    seen.add(id); unique.push(item);
-                                });
-                                if (unique.length > remoteRows.length || remoteRows.length === 0) {
-                                    DEMO_DB[key] = unique;
-                                    try { localStorage.setItem(`aksara_${key}`, JSON.stringify(unique)); localStorage.setItem(`master_${key}`, JSON.stringify(unique)); localStorage.setItem(`aksara_firebase_${key}`, JSON.stringify(unique)); } catch(e) {}
-                                    window.dispatchEvent(new CustomEvent('aksara:firebase-changed',{detail:{key}}));
-                                    if (key === 'users') window.dispatchEvent(new CustomEvent('aksara:users-changed',{detail:{key}}));
-                                    aksaraFbWrite(key);
-                                    return;
+                                const localRows = readDurableCollection(key);
+                                if (localRows.length && AKSARA_FIREBASE.auth?.currentUser) {
+                                    AKSARA_FIREBASE.db.ref(key).set(aksaraFbMap(key, localRows)).catch(e => console.warn('[AKSARA Firebase seed]', key, e));
+                                } else {
+                                    aksaraFbApply(key, []);
                                 }
-                            } catch(e) { console.warn('[AKSARA local merge]', key, e); }
-                        }
-                        // Jangan menghapus master mata pelajaran lokal hanya karena node Firebase belum berisi data.
-                        if (key === 'subjects') {
-                            try {
-                                const localSubjects = JSON.parse(localStorage.getItem('aksara_subjects') || '[]');
-                                const remoteSubjects = value && typeof value === 'object' ? aksaraFbArray(value) : [];
-                                // Gabungkan data lokal + Firebase berdasarkan ID/nama agar mapel yang sudah diisi tidak hilang.
-                                if (Array.isArray(localSubjects) && localSubjects.length) {
-                                    const merged = [...remoteSubjects];
-                                    localSubjects.forEach(localItem => {
-                                        const exists = merged.some(remoteItem => String(remoteItem.id || '') === String(localItem.id || '') || String(remoteItem.name || '').trim().toLowerCase() === String(localItem.name || '').trim().toLowerCase());
-                                        if (!exists) merged.push(localItem);
-                                    });
-                                    if (merged.length !== remoteSubjects.length || value === null) {
-                                        DEMO_DB.subjects = merged;
-                                        try { persistDurableCollection('subjects', merged); } catch(e) {}
-                                        aksaraFbWrite('subjects');
-                                        window.dispatchEvent(new CustomEvent('aksara:firebase-changed',{detail:{key:'subjects'}}));
-                                        return;
-                                    }
-                                }
-                            } catch(e) {}
+                            } catch(e) {
+                                aksaraFbApply(key, []);
+                            }
+                            return;
                         }
                         if (value !== null) aksaraFbApply(key,value);
-                    },err=>console.warn('[AKSARA Firebase realtime]',key,err));
+                    },err=>{
+                        console.warn('[AKSARA Firebase realtime]',key,err);
+                        window.dispatchEvent(new CustomEvent('aksara:firebase-error',{detail:{key,error:err}}));
+                    });
                 });
+                await aksaraFbFlushPendingWrites();
                 window.dispatchEvent(new CustomEvent('aksara:firebase-status',{detail:{connected:true}}));
             } catch(e) {
                 console.warn('[AKSARA Firebase]',e);
@@ -605,7 +595,12 @@ var DEMO_DB = {
         };
         // Firebase is an additional synchronization layer; existing local login and app logic remain unchanged.
         aksaraFbInstall();
-        aksaraFbReady().catch(e => console.warn('[AKSARA Firebase SDK]', e));
+        aksaraFbReady().then(() => {
+            // Pulihkan sinkronisasi otomatis setelah refresh/perangkat baru ketika sesi Firebase masih aktif.
+            if (AKSARA_FIREBASE.auth?.currentUser) {
+                aksaraFbStart().catch(e => console.warn('[AKSARA Firebase auto-start]', e));
+            }
+        }).catch(e => console.warn('[AKSARA Firebase SDK]', e));
 
 var mockApiService = {
   login: function () {
@@ -4757,8 +4752,17 @@ if ('serviceWorker' in navigator) {
         const aksaraFbPersistCollection = async (key, rows) => {
             const data = Array.isArray(rows) ? rows : [];
             try { persistDurableCollection(key, data); localStorage.setItem(`aksara_firebase_${key}`, JSON.stringify(data)); } catch (e) {}
-            try { await aksaraFbReady(); if (!AKSARA_FIREBASE.auth?.currentUser) return false; await AKSARA_FIREBASE.db.ref(key).set(aksaraFbMap(key, data)); return true; }
-            catch (e) { console.warn('[AKSARA] Persist Firebase gagal', key, e); return false; }
+            try {
+                await aksaraFbReady();
+                AKSARA_FIREBASE_PENDING_WRITES.add(key);
+                if (!AKSARA_FIREBASE.auth?.currentUser) return false;
+                await AKSARA_FIREBASE.db.ref(key).set(aksaraFbMap(key, data));
+                AKSARA_FIREBASE_PENDING_WRITES.delete(key);
+                return true;
+            } catch (e) {
+                console.warn('[AKSARA] Persist Firebase gagal', key, e);
+                return false;
+            }
         };
 
         const getRegisteredStudents = () => {
