@@ -434,6 +434,9 @@ var DEMO_DB = {
             appId: "1:32316105558:web:baa13335a697309039acf7",
             measurementId: "G-4ZX5ES21GY"
         };
+        // REALTIME MODE: Firebase Realtime Database menjadi sumber data bersama untuk semua perangkat.
+        // Firebase Anonymous Authentication dipakai sebagai fallback agar perangkat yang login ke AKSARA
+        // tetap memiliki sesi Firebase dan dapat menerima listener realtime.
         const AKSARA_FIREBASE_SYNC_KEYS = [
             'users','schools','academicYears','teachers','students','parents','parent_student',
             'classes','subjects','questions','questionBanks','examPackages','examSchedules',
@@ -498,7 +501,7 @@ var DEMO_DB = {
                     target[prop]=wrap(val);
                     if(!AKSARA_FIREBASE.applying){
                         clearTimeout(AKSARA_FIREBASE.timer);
-                        AKSARA_FIREBASE.timer=setTimeout(()=>aksaraFbWrite(key),350);
+                        AKSARA_FIREBASE.timer=setTimeout(()=>aksaraFbWrite(key),0);
                     }
                     return true;
                 },
@@ -506,7 +509,7 @@ var DEMO_DB = {
                     delete target[prop];
                     if(!AKSARA_FIREBASE.applying){
                         clearTimeout(AKSARA_FIREBASE.timer);
-                        AKSARA_FIREBASE.timer=setTimeout(()=>aksaraFbWrite(key),350);
+                        AKSARA_FIREBASE.timer=setTimeout(()=>aksaraFbWrite(key),0);
                     }
                     return true;
                 }
@@ -648,7 +651,18 @@ var DEMO_DB = {
                         AKSARA_FIREBASE.uid = null;
                     }
                 });
-                if (AKSARA_FIREBASE.auth.currentUser) await aksaraFbStart();
+                if (AKSARA_FIREBASE.auth.currentUser) {
+                    await aksaraFbStart();
+                } else {
+                    // Semua perangkat harus memiliki sesi Firebase agar listener realtime aktif.
+                    // Jika akun aplikasi belum memiliki akun Firebase, gunakan Anonymous Auth.
+                    try {
+                        await AKSARA_FIREBASE.auth.signInAnonymously();
+                    } catch (authError) {
+                        console.error('[AKSARA Firebase Anonymous Auth]', authError);
+                        window.dispatchEvent(new CustomEvent('aksara:firebase-error',{detail:{error:authError,key:'auth'}}));
+                    }
+                }
             } catch(e) { console.warn('[AKSARA Firebase SDK]', e); }
         };
         aksaraFbInstall();
@@ -4712,7 +4726,7 @@ if ('serviceWorker' in navigator) {
                     clearTimeout(AKSARA_FIREBASE.persistTimers[key]);
                     AKSARA_FIREBASE.persistTimers[key] = setTimeout(() => {
                         aksaraFbPersistCollection(key, data).catch(err => console.warn('[AKSARA] Auto-sync', key, err));
-                    }, 180);
+                    }, 0);
                 } catch(e) {}
             }
         };
