@@ -522,6 +522,8 @@ var DEMO_DB = {
             return proxy;
         };
         const aksaraFbApply = (key,value) => {
+            // LISTENER REALTIME ADALAH SUMBER KEBENARAN. Jika Firebase mengirim null/{}
+            // karena record dihapus pada perangkat lain, koleksi lokal HARUS ikut menjadi kosong.
             AKSARA_FIREBASE.applying = true;
             try {
                 if (key === 'systemHealth') {
@@ -533,9 +535,12 @@ var DEMO_DB = {
                 }
                 try {
                     localStorage.setItem(`aksara_firebase_${key}`, JSON.stringify(DEMO_DB[key]));
-                    if (['students','parents','subjects','users'].includes(key)) localStorage.setItem(`aksara_${key}`, JSON.stringify(DEMO_DB[key]));
+                    localStorage.setItem(`aksara_${key}`, JSON.stringify(DEMO_DB[key]));
+                    localStorage.setItem(`master_${key}`, JSON.stringify(DEMO_DB[key]));
                 } catch(e){}
-                window.dispatchEvent(new CustomEvent('aksara:firebase-changed',{detail:{key}}));
+                // Satu event untuk seluruh aplikasi agar komponen yang sedang terbuka langsung render ulang.
+                window.dispatchEvent(new CustomEvent('aksara:firebase-changed',{detail:{key,source:'firebase-realtime'}}));
+                window.dispatchEvent(new CustomEvent(`aksara:${key}-changed`,{detail:{key,source:'firebase-realtime'}}));
                 if (key === 'users') window.dispatchEvent(new CustomEvent('aksara:users-changed',{detail:{key}}));
             } finally {
                 setTimeout(()=>{ AKSARA_FIREBASE.applying=false; aksaraFbInstall(); },0);
@@ -557,16 +562,20 @@ var DEMO_DB = {
                 const latest = snap.val() && typeof snap.val() === 'object' ? snap.val() : {};
                 const updates = {};
                 const deletes = [];
-                // Hanya kirim perubahan yang memang dibuat sejak snapshot terakhir yang diterima.
-                // Ini mencegah perangkat B menghapus perubahan perangkat A karena cache lokal lama.
+                // Update record yang memang berubah dari baseline.
                 Object.entries(localMap).forEach(([id,item]) => {
                     const before = JSON.stringify(baseline[id] === undefined ? null : baseline[id]);
                     const after = JSON.stringify(item);
                     if (before !== after) updates[id] = item;
                 });
+                // Penghapusan eksplisit: bila record ada pada baseline dan sekarang hilang dari local,
+                // hapus child Firebase HANYA jika child tersebut belum berubah oleh perangkat lain.
+                // Dengan begitu penghapusan A tidak menimpa perubahan baru B.
                 Object.keys(baseline).forEach(id => {
                     if (localMap[id] === undefined && latest[id] !== undefined && JSON.stringify(latest[id]) === JSON.stringify(baseline[id])) deletes.push(id);
                 });
+                // Jika listener belum sempat memperbarui baseline, tetapi snapshot terbaru identik dengan
+                // baseline, aturan di atas tetap menghapus record. Jika latest sudah berubah, perubahan B dipertahankan.
                 const patch = {};
                 Object.entries(updates).forEach(([id,item]) => patch[id] = item);
                 deletes.forEach(id => patch[id] = null);
@@ -634,22 +643,28 @@ var DEMO_DB = {
                     const root = AKSARA_FIREBASE.db.ref();
                     const snap = await root.once('value');
                     const remote = snap.val() && typeof snap.val() === 'object' ? snap.val() : {};
-                    // Firebase adalah sumber kebenaran. Cache lokal hanya boleh dimigrasikan
-                    // jika koleksi cloud tersebut benar-benar belum memiliki data. Record yang
-                    // sudah ada di cloud tidak pernah ditimpa oleh localStorage saat boot.
+                    // CLOUD INITIALIZATION MARKER:
+                    // Setelah Firebase pernah dipakai, koleksi cloud yang kosong berarti memang kosong.
+                    // Jangan menghidupkan kembali record lama dari localStorage pada perangkat lain.
+                    // Ini adalah sumber utama masalah: A menghapus data -> Firebase kosong -> B boot ->
+                    // cache lama B mengunggah kembali data yang sudah dihapus.
+                    const meta = remote.__aksaraMeta && typeof remote.__aksaraMeta === 'object' ? remote.__aksaraMeta : {};
+                    const hasCloudCollections = AKSARA_FIREBASE_SYNC_KEYS.some(key => Object.prototype.hasOwnProperty.call(remote,key));
+                    const cloudInitialized = meta.initialized === true || hasCloudCollections;
                     const initialUpdates = {};
-                    AKSARA_FIREBASE_SYNC_KEYS.forEach(key => {
-                        if (key === 'systemHealth') {
-                            if (remote[key] == null && DEMO_DB[key]) initialUpdates[key] = aksaraFbSafe(DEMO_DB[key]);
-                            return;
-                        }
-                        const remoteMap = remote[key] && typeof remote[key] === 'object' ? remote[key] : {};
-                        const local = Array.isArray(DEMO_DB[key]) ? DEMO_DB[key] : [];
-                        if (Object.keys(remoteMap).length === 0 && local.length) {
-                            const localMap = aksaraFbMap(key, local);
-                            Object.entries(localMap).forEach(([id,item]) => { initialUpdates[`${key}/${id}`] = item; });
-                        }
-                    });
+                    if (!cloudInitialized) {
+                        AKSARA_FIREBASE_SYNC_KEYS.forEach(key => {
+                            if (key === 'systemHealth') return;
+                            const local = Array.isArray(DEMO_DB[key]) ? DEMO_DB[key] : [];
+                            if (local.length) {
+                                const localMap = aksaraFbMap(key, local);
+                                Object.entries(localMap).forEach(([id,item]) => { initialUpdates[`${key}/${id}`] = item; });
+                            }
+                        });
+                        initialUpdates['__aksaraMeta'] = { initialized:true, initializedAt:new Date().toISOString(), version:2 };
+                    } else if (!meta.initialized) {
+                        initialUpdates['__aksaraMeta'] = { ...meta, initialized:true, initializedAt:meta.initializedAt || new Date().toISOString(), version:2 };
+                    }
                     if (Object.keys(initialUpdates).length) {
                         await root.update(initialUpdates);
                         const refreshed = await root.once('value');
@@ -7640,7 +7655,7 @@ if ('serviceWorker' in navigator) {
         };
 
         const App = () => {
-            const [, setFirebaseVersion] = React.useState(0);
+            const [firebaseVersion, setFirebaseVersion] = React.useState(0);
             React.useEffect(() => {
                 const refresh = () => setFirebaseVersion(v => v + 1);
                 ['aksara:firebase-changed','aksara:users-changed','aksara:schools-changed','aksara:teachers-changed','aksara:students-changed','aksara:parents-changed'].forEach(ev => window.addEventListener(ev, refresh));
@@ -7728,6 +7743,7 @@ if ('serviceWorker' in navigator) {
 
             return (
                 <AppContext.Provider value={contextValue}>
+                    <div key={firebaseVersion} className="contents">
                     {route === 'landing' && <LandingPage setRoute={setRoute} />}
                     {route === 'login' && <LoginPage />}
                     {route === 'forgot-password' && <ForgotPasswordPage />}
@@ -7745,6 +7761,7 @@ if ('serviceWorker' in navigator) {
                             </DashboardLayout>
                         )
                     ) : null}
+                    </div>
                 </AppContext.Provider>
             );
         };
