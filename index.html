@@ -640,7 +640,10 @@ var DEMO_DB = {
         const aksaraFbBootAuth = async () => {
             try {
                 await aksaraFbReady();
-                if (AKSARA_FIREBASE.authUnsubscribe) return;
+                if (AKSARA_FIREBASE.authUnsubscribe) {
+                    if (AKSARA_FIREBASE.auth.currentUser) await aksaraFbStart();
+                    return AKSARA_FIREBASE.auth.currentUser || null;
+                }
                 AKSARA_FIREBASE.authUnsubscribe = AKSARA_FIREBASE.auth.onAuthStateChanged(async user => {
                     if (user) {
                         try { await aksaraFbStart(); }
@@ -654,19 +657,39 @@ var DEMO_DB = {
                 if (AKSARA_FIREBASE.auth.currentUser) {
                     await aksaraFbStart();
                 } else {
-                    // Semua perangkat harus memiliki sesi Firebase agar listener realtime aktif.
-                    // Jika akun aplikasi belum memiliki akun Firebase, gunakan Anonymous Auth.
-                    try {
-                        await AKSARA_FIREBASE.auth.signInAnonymously();
-                    } catch (authError) {
-                        console.error('[AKSARA Firebase Anonymous Auth]', authError);
-                        window.dispatchEvent(new CustomEvent('aksara:firebase-error',{detail:{error:authError,key:'auth'}}));
-                    }
+                    // Firebase harus siap SEBELUM login aplikasi dapat digunakan.
+                    // Anonymous Auth dipakai sebagai identitas koneksi Firebase bersama.
+                    await AKSARA_FIREBASE.auth.signInAnonymously();
+                    if (!AKSARA_FIREBASE.auth.currentUser) throw new Error('Firebase Authentication tidak menghasilkan sesi pengguna.');
+                    await aksaraFbStart();
                 }
-            } catch(e) { console.warn('[AKSARA Firebase SDK]', e); }
+                return AKSARA_FIREBASE.auth.currentUser || null;
+            } catch(e) {
+                console.error('[AKSARA Firebase SDK]', e);
+                window.dispatchEvent(new CustomEvent('aksara:firebase-error',{detail:{error:e,key:'auth'}}));
+                throw e;
+            }
         };
+        // Satu promise global: semua bagian aplikasi menunggu Firebase benar-benar siap.
+        window.__AKSARA_FIREBASE_BOOT_PROMISE = aksaraFbBootAuth();
         aksaraFbInstall();
-        aksaraFbBootAuth();
+
+        const aksaraFbRequireReady = async () => {
+            try {
+                if (window.__AKSARA_FIREBASE_BOOT_PROMISE) await window.__AKSARA_FIREBASE_BOOT_PROMISE;
+                await aksaraFbReady();
+                if (!AKSARA_FIREBASE.auth.currentUser) {
+                    await AKSARA_FIREBASE.auth.signInAnonymously();
+                }
+                if (!AKSARA_FIREBASE.auth.currentUser) throw new Error('Firebase Authentication belum aktif.');
+                await aksaraFbStart();
+                const snap = await AKSARA_FIREBASE.db.ref('.info/connected').once('value');
+                if (snap.val() !== true) throw new Error('Firebase Realtime Database belum terhubung.');
+                return true;
+            } catch (e) {
+                throw new Error(e?.message || 'Firebase belum siap.');
+            }
+        };
 
 var mockApiService = {
   login: function () {
@@ -4316,6 +4339,8 @@ if ('serviceWorker' in navigator) {
 
                 setLoading(true);
                 try {
+                    // Firebase harus tersambung terlebih dahulu sebelum akun aplikasi diproses.
+                    await aksaraFbRequireReady();
                     const response = await mockApiService.login(identifier, password);
                     login(response.data.user, response.data.token);
                 } catch (err) {
@@ -4387,7 +4412,11 @@ if ('serviceWorker' in navigator) {
                                     </div>
                                 </div>
                                 
-                                <div className="flex items-center justify-between">
+                                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600 flex items-center gap-2">
+                                <span className={`w-2 h-2 rounded-full ${AKSARA_FIREBASE.auth?.currentUser && AKSARA_FIREBASE.started ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`}></span>
+                                {AKSARA_FIREBASE.auth?.currentUser && AKSARA_FIREBASE.started ? 'Firebase siap • koneksi realtime aktif' : 'Menghubungkan ke Firebase sebelum login...'}
+                            </div>
+                            <div className="flex items-center justify-between">
                                     <label className="flex items-center gap-2 cursor-pointer">
                                         <input type="checkbox" className="rounded text-aksara-600 focus:ring-aksara-600 border-gray-300" />
                                         <span className="text-sm text-gray-600">Ingat saya</span>
@@ -6700,9 +6729,9 @@ if ('serviceWorker' in navigator) {
                 setChecking(true);
                 setData(null);
                 try {
-                    await aksaraFbReady();
+                    await aksaraFbRequireReady();
                     const authUser = AKSARA_FIREBASE.auth?.currentUser;
-                    if (!authUser) throw new Error('Akun Firebase belum terautentikasi.');
+                    if (!authUser) throw new Error('Firebase Authentication belum menghasilkan sesi.');
                     const connectedSnap = await AKSARA_FIREBASE.db.ref('.info/connected').once('value');
                     const connected = connectedSnap.val() === true;
                     if (!connected) throw new Error('Firebase Realtime Database belum terhubung.');
@@ -6727,7 +6756,7 @@ if ('serviceWorker' in navigator) {
             React.useEffect(() => { checkConnection(); }, [checkConnection]);
 
             if (checking || !data) return <div className="p-12 text-center text-gray-400">Memeriksa koneksi sumber data...</div>;
-            if (!data.actual) return <div className="space-y-6 animate-in fade-in duration-500"><div><h2 className="text-2xl font-heading font-bold text-gray-900">System Health & Integrasi</h2><p className="text-gray-500 text-sm">Hanya sumber data aktual yang ditampilkan.</p></div><div className="bg-white rounded-xl border border-amber-200 p-6"><p className="font-semibold text-amber-800">Belum terhubung</p><p className="text-sm text-gray-600 mt-2">Firebase Realtime Database belum terhubung atau akun Firebase belum aktif. Periksa koneksi Firebase dan autentikasi akun yang sedang login.</p><p className="text-xs text-gray-500 mt-3">Pemeriksaan terakhir: {checkedAt ? new Date(checkedAt).toLocaleString('id-ID') : 'Belum diperiksa'}</p><button onClick={checkConnection} className="mt-4 px-4 py-2 bg-aksara-600 text-white rounded-lg">Periksa ulang</button></div></div>;
+            if (!data.actual) return <div className="space-y-6 animate-in fade-in duration-500"><div><h2 className="text-2xl font-heading font-bold text-gray-900">System Health & Integrasi</h2><p className="text-gray-500 text-sm">Hanya sumber data aktual yang ditampilkan.</p></div><div className="bg-white rounded-xl border border-amber-200 p-6"><p className="font-semibold text-amber-800">Belum terhubung</p><p className="text-sm text-gray-600 mt-2">Firebase belum siap. Sistem akan memastikan Firebase Authentication aktif, lalu memeriksa koneksi Realtime Database. Jika tetap gagal, pastikan Anonymous Authentication aktif dan Rules Realtime Database mengizinkan auth != null.</p><p className="text-xs text-gray-500 mt-3">Pemeriksaan terakhir: {checkedAt ? new Date(checkedAt).toLocaleString('id-ID') : 'Belum diperiksa'}</p><button onClick={checkConnection} className="mt-4 px-4 py-2 bg-aksara-600 text-white rounded-lg">Periksa ulang</button></div></div>;
 
             const StatusIndicator = ({ status }) => (
                 <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold ${status === 'HEALTHY' ? 'bg-teal-50 text-teal-700 border border-teal-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
