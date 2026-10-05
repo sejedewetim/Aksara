@@ -546,18 +546,28 @@ var DEMO_DB = {
                 const snap = await AKSARA_FIREBASE.db.ref(key).once('value');
                 const latest = snap.val() && typeof snap.val() === 'object' ? snap.val() : {};
                 const updates = {};
-                const ids = new Set([...Object.keys(baseline), ...Object.keys(localMap)]);
-                ids.forEach(id => {
+                Object.keys(localMap).forEach(id => {
                     const before = JSON.stringify(baseline[id] === undefined ? null : baseline[id]);
-                    const after = JSON.stringify(localMap[id] === undefined ? null : localMap[id]);
-                    if (before !== after) updates[id] = localMap[id] === undefined ? null : localMap[id];
+                    const after = JSON.stringify(localMap[id]);
+                    if (before !== after) updates[id] = localMap[id];
                 });
                 if (Object.keys(updates).length) await AKSARA_FIREBASE.db.ref(key).update(updates);
-                else if (!Object.keys(latest).length && Object.keys(localMap).length) await AKSARA_FIREBASE.db.ref(key).set(localMap);
                 return true;
             } catch(e) {
                 console.warn('[AKSARA Firebase write]', key, e);
                 window.dispatchEvent(new CustomEvent('aksara:firebase-error',{detail:{error:e,key}}));
+                return false;
+            }
+        };
+        const aksaraFbDeleteRecord = async (key, id) => {
+            try {
+                await aksaraFbReady();
+                if (!AKSARA_FIREBASE.auth?.currentUser || !id) return false;
+                await AKSARA_FIREBASE.db.ref(`${key}/${id}`).remove();
+                if (AKSARA_FIREBASE.remoteMaps[key]) delete AKSARA_FIREBASE.remoteMaps[key][id];
+                return true;
+            } catch(e) {
+                console.warn('[AKSARA Firebase delete]', key, id, e);
                 return false;
             }
         };
@@ -582,29 +592,24 @@ var DEMO_DB = {
                     const appKeys = AKSARA_FIREBASE_SYNC_KEYS.filter(k => k !== 'systemHealth');
                     const hasApplicationData = appKeys.some(k => remote[k] && typeof remote[k] === 'object' && Object.keys(remote[k]).length);
 
-                    // Hanya perangkat pertama/instalasi pertama yang boleh melakukan seed lokal.
-                    // Jika Firebase sudah berisi data, DATA CLOUD TIDAK PERNAH ditimpa oleh cache lokal.
-                    if (!hasApplicationData) {
-                        const seed = {};
-                        AKSARA_FIREBASE_SYNC_KEYS.forEach(key => {
-                            const local = DEMO_DB[key];
-                            if (key === 'systemHealth') seed[key] = aksaraFbSafe(local || {});
-                            else if (Array.isArray(local) && local.length) seed[key] = aksaraFbMap(key, local);
+                    // Gabungkan record lokal yang belum ada di cloud tanpa pernah menimpa
+                    // koleksi milik perangkat lain. Firebase tetap menjadi sumber pusat.
+                    const initialUpdates = {};
+                    AKSARA_FIREBASE_SYNC_KEYS.forEach(key => {
+                        if (key === 'systemHealth') {
+                            if (remote[key] == null && DEMO_DB[key]) initialUpdates[key] = aksaraFbSafe(DEMO_DB[key]);
+                            return;
+                        }
+                        const remoteMap = remote[key] && typeof remote[key] === 'object' ? remote[key] : {};
+                        const local = Array.isArray(DEMO_DB[key]) ? DEMO_DB[key] : [];
+                        const localMap = aksaraFbMap(key, local);
+                        Object.entries(localMap).forEach(([id,item]) => {
+                            if (remoteMap[id] == null) initialUpdates[`${key}/${id}`] = item;
                         });
-                        if (Object.keys(seed).length) await root.update(seed);
-                    } else {
-                        // Jika node tertentu belum ada di cloud, seed hanya node tersebut.
-                        const missing = {};
-                        AKSARA_FIREBASE_SYNC_KEYS.forEach(key => {
-                            if (remote[key] == null && key !== 'systemHealth') {
-                                const local = Array.isArray(DEMO_DB[key]) ? DEMO_DB[key] : [];
-                                if (local.length) missing[key] = aksaraFbMap(key, local);
-                            }
-                        });
-                        if (Object.keys(missing).length) await root.update(missing);
-                    }
+                    });
+                    if (Object.keys(initialUpdates).length) await root.update(initialUpdates);
 
-                    // Pasang listener SETELAH initial read/seed selesai.
+                    // Pasang listener SETELAH initial read/merge selesai.
                     AKSARA_FIREBASE_SYNC_KEYS.forEach(key => {
                         const ref = AKSARA_FIREBASE.db.ref(key);
                         const handler = snp => aksaraFbApply(key, snp.val());
@@ -4176,7 +4181,12 @@ if ('serviceWorker' in navigator) {
                 for (const key of syncKeys) {
                     try {
                         const rows = Array.isArray(DEMO_DB[key]) ? DEMO_DB[key] : [];
-                        if (rows.length) await AKSARA_FIREBASE.db.ref(key).set(aksaraFbMap(key, rows));
+                        const snap = await AKSARA_FIREBASE.db.ref(key).once('value');
+                        const remoteMap = snap.val() && typeof snap.val() === 'object' ? snap.val() : {};
+                        const localMap = aksaraFbMap(key, rows);
+                        const updates = {};
+                        Object.entries(localMap).forEach(([id,item]) => { if (remoteMap[id] == null) updates[id] = item; });
+                        if (Object.keys(updates).length) await AKSARA_FIREBASE.db.ref(key).update(updates);
                     } catch(e) { console.warn('[AKSARA] Sinkron awal dilewati:', key, e); }
                 }
                 await aksaraFbStart();
@@ -4224,16 +4234,19 @@ if ('serviceWorker' in navigator) {
                 }
                 const rootSnap = await AKSARA_FIREBASE.db.ref().once('value');
                 const root = rootSnap.val() && typeof rootSnap.val() === 'object' ? rootSnap.val() : {};
-                const hasApplicationData = AKSARA_FIREBASE_SYNC_KEYS.filter(k=>k!=='systemHealth').some(k => root[k] && typeof root[k] === 'object' && Object.keys(root[k]).length);
-                if (!hasApplicationData) {
-                    const seed = {};
-                    AKSARA_FIREBASE_SYNC_KEYS.forEach(key => {
-                        const local = DEMO_DB[key];
-                        if (key === 'systemHealth') seed[key] = aksaraFbSafe(local || {});
-                        else if (Array.isArray(local) && local.length) seed[key] = aksaraFbMap(key, local);
+                const migrationUpdates = {};
+                AKSARA_FIREBASE_SYNC_KEYS.forEach(key => {
+                    if (key === 'systemHealth') {
+                        if (root[key] == null && DEMO_DB[key]) migrationUpdates[key] = aksaraFbSafe(DEMO_DB[key]);
+                        return;
+                    }
+                    const remoteMap = root[key] && typeof root[key] === 'object' ? root[key] : {};
+                    const localMap = aksaraFbMap(key, Array.isArray(DEMO_DB[key]) ? DEMO_DB[key] : []);
+                    Object.entries(localMap).forEach(([id,item]) => {
+                        if (remoteMap[id] == null) migrationUpdates[`${key}/${id}`] = item;
                     });
-                    if (Object.keys(seed).length) await AKSARA_FIREBASE.db.ref().update(seed);
-                }
+                });
+                if (Object.keys(migrationUpdates).length) await AKSARA_FIREBASE.db.ref().update(migrationUpdates);
                 const profile = { ...aksaraFbSafe(localUser), id: localUser.id || localUser.userId || cred.user.uid, userId: localUser.userId || localUser.id || cred.user.uid, firebaseUid: cred.user.uid, email: cred.user.email || email };
                 delete profile.password;
                 await AKSARA_FIREBASE.db.ref(`users/${cred.user.uid}`).set(profile);
@@ -4611,7 +4624,7 @@ if ('serviceWorker' in navigator) {
             const openModal = (school = null) => { setModal(school ? 'edit' : 'add'); setError(''); setForm(school ? { ...form, ...school } : { name: '', npsn: '', district: '', level: '', address: '', principalName: '', phone: '', status: 'ACTIVE' }); };
             const closeModal = () => { setModal(null); setError(''); };
             const saveSchool = async (e) => { e.preventDefault(); const name = form.name.trim(), npsn = String(form.npsn ?? '').trim(); if (!name || !npsn) return setError('Nama Sekolah dan NPSN wajib diisi.'); const next = { ...form, id: form.id || `SCH-${Date.now()}`, name: form.name.trim(), npsn: form.npsn.trim(), updatedAt:new Date().toISOString() }; const updated = modal === 'edit' ? schools.map(s => s.id === next.id ? next : s) : [...schools, next]; setSchools(updated); DEMO_DB.schools = updated; persistDurableCollection('schools', updated); await aksaraFbPersistCollection('schools', updated); window.dispatchEvent(new CustomEvent('aksara:schools-changed')); closeModal(); setNotice('Data sekolah berhasil disimpan dan disinkronkan ke Firebase.'); setTimeout(() => setNotice(''), 3000); };
-            const deleteSchool = async (school) => { const updated = schools.filter(s => s.id !== school.id); setSchools(updated); DEMO_DB.schools = updated; persistDurableCollection('schools', updated); await aksaraFbPersistCollection('schools', updated); window.dispatchEvent(new CustomEvent('aksara:schools-changed')); setNotice('Data sekolah berhasil dihapus dan disinkronkan.'); };
+            const deleteSchool = async (school) => { const updated = schools.filter(s => s.id !== school.id); setSchools(updated); DEMO_DB.schools = updated; persistDurableCollection('schools', updated); await aksaraFbPersistCollection('schools', updated); await aksaraFbDeleteRecord('schools', school.id); window.dispatchEvent(new CustomEvent('aksara:schools-changed')); setNotice('Data sekolah berhasil dihapus dan disinkronkan.'); };
             const removeParent = (parent) => {
                 if (!window.confirm(`Hapus data orang tua/wali ${parent.name || ''}?`)) return;
                 const updated = parents.filter(p => String(p.id) !== String(parent.id));
@@ -4705,7 +4718,10 @@ if ('serviceWorker' in navigator) {
         };
         const aksaraFbPersistCollection = async (key, rows) => {
             const data = Array.isArray(rows) ? rows : [];
-            try { persistDurableCollection(key, data); localStorage.setItem(`aksara_firebase_${key}`, JSON.stringify(data)); } catch(e) {}
+            try {
+                persistDurableCollection(key, data);
+                localStorage.setItem(`aksara_firebase_${key}`, JSON.stringify(data));
+            } catch(e) {}
             try {
                 await aksaraFbReady();
                 if (!AKSARA_FIREBASE.auth?.currentUser) return false;
@@ -4714,6 +4730,7 @@ if ('serviceWorker' in navigator) {
                 return await aksaraFbWrite(key);
             } catch (e) {
                 console.warn('[AKSARA] Persist Firebase gagal', key, e);
+                window.dispatchEvent(new CustomEvent('aksara:firebase-error',{detail:{error:e,key}}));
                 return false;
             }
         };
@@ -4833,7 +4850,7 @@ if ('serviceWorker' in navigator) {
             const [form, setForm] = React.useState(blank);
             const filtered = teachers.filter(t => (!selectedSchool || t.schoolId === selectedSchool) && (!search || `${t.name} ${t.nip || ''} ${t.nuptk || ''} ${t.nik || ''} ${t.username || ''} ${t.schoolId || ''} ${t.district || ''}`.toLowerCase().includes(search.toLowerCase())) && (!status || t.status === status) && (!school || t.schoolId === school));
             const save = async (e) => { e.preventDefault(); setError(''); const username = form.username.trim() || `guru${String(teachers.length + 1).padStart(2, '0')}`; const password = form.password || `Aksara-${Math.random().toString(36).slice(2, 8)}!`; if (!form.name.trim()) return setError('Nama Lengkap wajib diisi.'); if (!form.schoolId || !getSchoolName(form.schoolId)) return setError('Sekolah wajib dipilih dari data sekolah yang sudah terdaftar.'); if (teachers.some(t => t.id !== editingId && t.username === username)) return setError('Username sudah digunakan.'); const existing = editingId ? teachers.find(t => String(t.id) === String(editingId)) : null; const next = { ...existing, ...form, id: editingId || `TCH-${Date.now()}`, teacherId: existing?.teacherId || editingId || `TCH-${Date.now()}`, userId: existing?.userId || `USR-GURU-${editingId || Date.now()}`, schoolName: getSchoolName(form.schoolId), name: form.name.trim(), username, password, role:'GURU', updatedAt:new Date().toISOString() }; const updated = editingId ? teachers.map(t => t.id === editingId ? next : t) : [...teachers, next]; setTeachers(updated); DEMO_DB.teachers = updated; persistDurableCollection('teachers', updated); const teacherUser = { id: next.userId, userId: next.userId, teacherId: next.teacherId, username: next.username, password: next.password, name: next.name, email: next.email, phone: next.phone, schoolId: next.schoolId, schoolName: next.schoolName, role: 'GURU', status: next.status || 'ACTIVE' }; const existingUsers = mergeCollectionRecords('users').filter(u => String(u.id || u.userId || '') !== String(teacherUser.id)); DEMO_DB.users = [...existingUsers, teacherUser]; persistDurableCollection('users', DEMO_DB.users); try { await aksaraFbPersistCollection('teachers', updated); await aksaraFbPersistCollection('users', DEMO_DB.users); await aksaraFbProvisionSecondaryAccount(teacherUser, 'GURU', 'USR-GURU'); } catch(e) { console.warn('[AKSARA] Sinkron guru:',e); } window.dispatchEvent(new CustomEvent('aksara:users-changed')); window.dispatchEvent(new CustomEvent('aksara:teachers-changed')); setForm(blank); setEditingId(null); setModal(false); setNotice(editingId ? 'Data guru berhasil diperbarui dan disinkronkan.' : 'Data guru berhasil disimpan, akun Firebase dibuat, dan disinkronkan.'); setTimeout(() => setNotice(''), 3000); };
-            const remove = async (teacher) => { const updated = teachers.filter(t => t.id !== teacher.id); setTeachers(updated); DEMO_DB.teachers = updated; persistDurableCollection('teachers', updated); await aksaraFbPersistCollection('teachers', updated); window.dispatchEvent(new CustomEvent('aksara:teachers-changed')); setNotice('Data guru berhasil dihapus dan disinkronkan.'); };
+            const remove = async (teacher) => { const updated = teachers.filter(t => t.id !== teacher.id); setTeachers(updated); DEMO_DB.teachers = updated; persistDurableCollection('teachers', updated); await aksaraFbPersistCollection('teachers', updated); await aksaraFbDeleteRecord('teachers', teacher.id); window.dispatchEvent(new CustomEvent('aksara:teachers-changed')); setNotice('Data guru berhasil dihapus dan disinkronkan.'); };
             React.useEffect(() => { const onKey = e => e.key === 'Escape' && setModal(false); window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey); }, []);
             return <div className="space-y-6 animate-in fade-in duration-500"><div className="flex flex-col sm:flex-row justify-between gap-4"><div><h2 className="text-2xl font-heading font-bold text-gray-900">Data Guru</h2><p className="text-gray-500 text-sm">Kelola profil guru dan kredensial admin secara aman.</p><MasterImportPanel kind="teachers" /></div><button onClick={() => { setEditingId(null); setForm(blank); setError(''); setModal(true); }} className="px-4 py-2 bg-aksara-600 text-white rounded-lg font-medium hover:bg-aksara-900">+ Tambah Guru</button></div>{notice && <div role="status" className="p-3 rounded-lg border border-teal-200 bg-teal-50 text-teal-700">{notice}</div>}<div className="bg-white rounded-xl border border-gray-200 overflow-hidden"><div className="p-4 bg-gray-50 border-b flex flex-wrap gap-3"><input aria-label="Cari guru" value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari nama, NIP, username, sekolah..." className="flex-1 min-w-56 px-4 py-2 border rounded-lg"/><select aria-label="Filter status" value={status} onChange={e => setStatus(e.target.value)} className="px-3 py-2 border rounded-lg"><option value="">Semua Status</option><option value="ACTIVE">Aktif</option><option value="INACTIVE">Nonaktif</option></select><select aria-label="Filter sekolah" value={school} onChange={e => setSchool(e.target.value)} className="px-3 py-2 border rounded-lg"><option value="">Semua Sekolah</option>{getRegisteredSchools().map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select><button onClick={() => { setSearch(''); setStatus(''); setSchool(''); }} className="px-3 py-2 border rounded-lg">Reset</button></div><div className="p-3 bg-amber-50 text-amber-800 text-xs border-b">Kredensial hanya untuk kebutuhan Admin. Password disembunyikan secara default.</div><div className="overflow-x-auto"><table className="w-full text-left"><thead><tr className="bg-gray-50 border-b text-xs uppercase text-gray-500"><th className="px-4 py-3">No</th><th className="px-4 py-3">Nama Guru</th><th className="px-4 py-3">NIP/NUPTK</th><th className="px-4 py-3">Kontak</th><th className="px-4 py-3">Sekolah</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Username</th><th className="px-4 py-3">Password</th><th className="px-4 py-3 text-right">Aksi</th></tr></thead><tbody className="divide-y text-sm">{filtered.map((t, i) => <tr key={t.id} className="hover:bg-gray-50"><td className="px-4 py-3">{i + 1}</td><td className="px-4 py-3 font-semibold">{t.name}</td><td className="px-4 py-3 font-mono">{t.nip || t.nuptk || '-'}</td><td className="px-4 py-3">{t.email || t.phone || '-'}</td><td className="px-4 py-3"><div className="text-xs text-gray-500">{DEMO_DB.schools.find(s => s.id === t.schoolId)?.name || '-'}</div></td><td className="px-4 py-3"><Badge status={t.status} /></td><td className="px-4 py-3 font-mono">{t.username || '-'}</td><td className="px-4 py-3 font-mono text-gray-500">{t.password ? 'Tersedia' : 'Belum ditetapkan'}</td><td className="px-4 py-3 text-right whitespace-nowrap"><button onClick={() => { setEditingId(t.id); setForm({ ...blank, ...t }); setError(''); setModal(true); }} className="text-aksara-600 mr-2">Edit</button><button onClick={() => setVisible(v => ({ ...v, [t.id]: !v[t.id] }))} className="text-aksara-600 mr-2">{visible[t.id] ? 'Sembunyikan' : 'Lihat'}</button><button onClick={() => navigator.clipboard?.writeText(`${t.username || ''} / ${t.password || ''}`)} className="text-aksara-600 mr-2">Salin</button><button onClick={() => remove(t)} className="text-red-600">Hapus</button></td></tr>)}{filtered.length === 0 && <tr><td colSpan="8" className="p-10 text-center text-gray-500">Belum ada data guru yang sesuai.</td></tr>}</tbody></table></div></div>{modal && <div role="dialog" aria-modal="true" onClick={() => setModal(false)} className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-gray-900/50"><form onSubmit={save} onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6"><div className="flex justify-between items-center mb-5"><h3 className="text-xl font-bold">{editingId ? 'Edit Guru' : 'Tambah Guru'}</h3><button type="button" aria-label="Tutup" onClick={() => setModal(false)} className="text-2xl text-gray-500">×</button></div>{error && <div className="mb-4 p-3 rounded-lg bg-red-50 text-red-700">{error}</div>}<div className="grid md:grid-cols-2 gap-4">{[['name','Nama Lengkap'],['nip','NIP/NUPTK'],['email','Email'],['phone','Nomor Telepon'],['district','Kecamatan'],['username','Username'],['password','Password']].map(([key,label]) => <label key={key} className="text-sm font-medium">{label}{key === 'name' && <span className="text-red-500"> *</span>}<div className="relative mt-1"><input type={key === 'password' && !showPassword ? 'password' : 'text'} value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })} placeholder={key === 'username' || key === 'password' ? 'Kosongkan untuk generate otomatis' : ''} className="w-full border rounded-lg p-2.5 pr-20" />{key === 'password' && <button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-aksara-600">{showPassword ? 'Sembunyikan' : 'Tampilkan'}</button>}</div></label>)}<label className="text-sm font-medium">Sekolah<select required value={form.schoolId} onChange={e => setForm({ ...form, schoolId: e.target.value })} className="mt-1 w-full border rounded-lg p-2.5"><option value="">Pilih sekolah</option>{getRegisteredSchools().map(s => <option key={s.id} value={s.id}>{s.name}{s.npsn ? ` — ${s.npsn}` : ''}</option>)}</select></label><label className="text-sm font-medium">Status<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className="mt-1 w-full border rounded-lg p-2.5"><option value="ACTIVE">Aktif</option><option value="INACTIVE">Nonaktif</option></select></label></div><div className="flex justify-end gap-3 mt-6"><button type="button" onClick={() => setModal(false)} className="px-4 py-2 bg-gray-100 rounded-lg">Batal</button><button type="submit" className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Simpan Guru</button></div></form></div>}</div>;
         };
