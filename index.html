@@ -6686,10 +6686,25 @@ if ('serviceWorker' in navigator) {
                 setChecking(true);
                 setData(null);
                 try {
-                    const result = await window.dataSdk?.init?.({ onDataChanged() {} });
-                    setData({ actual: false, result });
+                    await aksaraFbReady();
+                    const authUser = AKSARA_FIREBASE.auth?.currentUser;
+                    if (!authUser) throw new Error('Akun Firebase belum terautentikasi.');
+                    const connectedSnap = await AKSARA_FIREBASE.db.ref('.info/connected').once('value');
+                    const connected = connectedSnap.val() === true;
+                    if (!connected) throw new Error('Firebase Realtime Database belum terhubung.');
+                    const rootSnap = await AKSARA_FIREBASE.db.ref().once('value');
+                    const root = rootSnap.val() || {};
+                    const count = key => { const value = root[key]; return value && typeof value === 'object' ? Object.keys(value).length : 0; };
+                    setData({ actual: true, data: {
+                        database: 'HEALTHY', realtime: 'HEALTHY',
+                        activeCatSessions: Array.isArray(DEMO_DB.examAttempts) ? DEMO_DB.examAttempts.filter(x => String(x.status || '').toUpperCase() === 'IN_PROGRESS').length : 0,
+                        activeUsers: count('users') || (Array.isArray(DEMO_DB.users) ? DEMO_DB.users.filter(x => String(x.status || 'ACTIVE').toUpperCase() === 'ACTIVE').length : 0)
+                    }, firebase: {
+                        projectId: AKSARA_FIREBASE_CONFIG.projectId, uid: authUser.uid, connected,
+                        records: { schools: count('schools'), teachers: count('teachers'), students: count('students'), parents: count('parents'), users: count('users') }
+                    }, webhooks: Array.isArray(DEMO_DB.webhooks) ? DEMO_DB.webhooks : [] });
                 } catch (error) {
-                    setData({ actual: false, error: 'Sumber data belum terhubung.' });
+                    setData({ actual: false, error: error?.message || 'Firebase belum terhubung.' });
                 } finally {
                     setCheckedAt(new Date().toISOString());
                     setChecking(false);
@@ -6698,7 +6713,7 @@ if ('serviceWorker' in navigator) {
             React.useEffect(() => { checkConnection(); }, [checkConnection]);
 
             if (checking || !data) return <div className="p-12 text-center text-gray-400">Memeriksa koneksi sumber data...</div>;
-            if (!data.actual) return <div className="space-y-6 animate-in fade-in duration-500"><div><h2 className="text-2xl font-heading font-bold text-gray-900">System Health & Integrasi</h2><p className="text-gray-500 text-sm">Hanya sumber data aktual yang ditampilkan.</p></div><div className="bg-white rounded-xl border border-amber-200 p-6"><p className="font-semibold text-amber-800">Belum terhubung</p><p className="text-sm text-gray-600 mt-2">Data belum tersedia dari Canva Sheet atau integrasi yang terkonfigurasi.</p><p className="text-xs text-gray-500 mt-3">Pemeriksaan terakhir: {checkedAt ? new Date(checkedAt).toLocaleString('id-ID') : 'Belum diperiksa'}</p><button onClick={checkConnection} className="mt-4 px-4 py-2 bg-aksara-600 text-white rounded-lg">Periksa ulang</button></div></div>;
+            if (!data.actual) return <div className="space-y-6 animate-in fade-in duration-500"><div><h2 className="text-2xl font-heading font-bold text-gray-900">System Health & Integrasi</h2><p className="text-gray-500 text-sm">Hanya sumber data aktual yang ditampilkan.</p></div><div className="bg-white rounded-xl border border-amber-200 p-6"><p className="font-semibold text-amber-800">Belum terhubung</p><p className="text-sm text-gray-600 mt-2">Firebase Realtime Database belum terhubung atau akun Firebase belum aktif. Periksa koneksi Firebase dan autentikasi akun yang sedang login.</p><p className="text-xs text-gray-500 mt-3">Pemeriksaan terakhir: {checkedAt ? new Date(checkedAt).toLocaleString('id-ID') : 'Belum diperiksa'}</p><button onClick={checkConnection} className="mt-4 px-4 py-2 bg-aksara-600 text-white rounded-lg">Periksa ulang</button></div></div>;
 
             const StatusIndicator = ({ status }) => (
                 <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold ${status === 'HEALTHY' ? 'bg-teal-50 text-teal-700 border border-teal-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
