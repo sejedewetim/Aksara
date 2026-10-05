@@ -542,8 +542,11 @@ var DEMO_DB = {
             }
         };
         const aksaraFbWrite = async key => {
-            if (!AKSARA_FIREBASE.ready || AKSARA_FIREBASE.applying || !AKSARA_FIREBASE.auth?.currentUser) return false;
+            if (!AKSARA_FIREBASE.ready || AKSARA_FIREBASE.applying || !AKSARA_FIREBASE.auth?.currentUser) {
+                throw new Error(`Firebase belum siap untuk menyimpan ${key}.`);
+            }
             try {
+                await aksaraFbWaitConnected(15000);
                 if (key === 'systemHealth') {
                     await AKSARA_FIREBASE.db.ref(key).set(aksaraFbSafe(DEMO_DB[key] || {}));
                     return true;
@@ -553,17 +556,29 @@ var DEMO_DB = {
                 const snap = await AKSARA_FIREBASE.db.ref(key).once('value');
                 const latest = snap.val() && typeof snap.val() === 'object' ? snap.val() : {};
                 const updates = {};
-                Object.keys(localMap).forEach(id => {
+                const deletes = [];
+                // Hanya kirim perubahan yang memang dibuat sejak snapshot terakhir yang diterima.
+                // Ini mencegah perangkat B menghapus perubahan perangkat A karena cache lokal lama.
+                Object.entries(localMap).forEach(([id,item]) => {
                     const before = JSON.stringify(baseline[id] === undefined ? null : baseline[id]);
-                    const after = JSON.stringify(localMap[id]);
-                    if (before !== after) updates[id] = localMap[id];
+                    const after = JSON.stringify(item);
+                    if (before !== after) updates[id] = item;
                 });
-                if (Object.keys(updates).length) await AKSARA_FIREBASE.db.ref(key).update(updates);
+                Object.keys(baseline).forEach(id => {
+                    if (localMap[id] === undefined && latest[id] !== undefined && JSON.stringify(latest[id]) === JSON.stringify(baseline[id])) deletes.push(id);
+                });
+                const patch = {};
+                Object.entries(updates).forEach(([id,item]) => patch[id] = item);
+                deletes.forEach(id => patch[id] = null);
+                if (Object.keys(patch).length) await AKSARA_FIREBASE.db.ref(key).update(patch);
+                const verify = await AKSARA_FIREBASE.db.ref(key).once('value');
+                const verified = verify.val() && typeof verify.val() === 'object' ? verify.val() : {};
+                AKSARA_FIREBASE.remoteMaps[key] = JSON.parse(JSON.stringify(verified));
                 return true;
             } catch(e) {
                 console.warn('[AKSARA Firebase write]', key, e);
                 window.dispatchEvent(new CustomEvent('aksara:firebase-error',{detail:{error:e,key}}));
-                return false;
+                throw e;
             }
         };
         // Tunggu koneksi Realtime Database benar-benar ONLINE.
@@ -619,11 +634,9 @@ var DEMO_DB = {
                     const root = AKSARA_FIREBASE.db.ref();
                     const snap = await root.once('value');
                     const remote = snap.val() && typeof snap.val() === 'object' ? snap.val() : {};
-                    const appKeys = AKSARA_FIREBASE_SYNC_KEYS.filter(k => k !== 'systemHealth');
-                    const hasApplicationData = appKeys.some(k => remote[k] && typeof remote[k] === 'object' && Object.keys(remote[k]).length);
-
-                    // Gabungkan record lokal yang belum ada di cloud tanpa pernah menimpa
-                    // koleksi milik perangkat lain. Firebase tetap menjadi sumber pusat.
+                    // Firebase adalah sumber kebenaran. Cache lokal hanya boleh dimigrasikan
+                    // jika koleksi cloud tersebut benar-benar belum memiliki data. Record yang
+                    // sudah ada di cloud tidak pernah ditimpa oleh localStorage saat boot.
                     const initialUpdates = {};
                     AKSARA_FIREBASE_SYNC_KEYS.forEach(key => {
                         if (key === 'systemHealth') {
@@ -632,14 +645,23 @@ var DEMO_DB = {
                         }
                         const remoteMap = remote[key] && typeof remote[key] === 'object' ? remote[key] : {};
                         const local = Array.isArray(DEMO_DB[key]) ? DEMO_DB[key] : [];
-                        const localMap = aksaraFbMap(key, local);
-                        Object.entries(localMap).forEach(([id,item]) => {
-                            if (remoteMap[id] == null) initialUpdates[`${key}/${id}`] = item;
-                        });
+                        if (Object.keys(remoteMap).length === 0 && local.length) {
+                            const localMap = aksaraFbMap(key, local);
+                            Object.entries(localMap).forEach(([id,item]) => { initialUpdates[`${key}/${id}`] = item; });
+                        }
                     });
-                    if (Object.keys(initialUpdates).length) await root.update(initialUpdates);
+                    if (Object.keys(initialUpdates).length) {
+                        await root.update(initialUpdates);
+                        const refreshed = await root.once('value');
+                        Object.assign(remote, refreshed.val() && typeof refreshed.val() === 'object' ? refreshed.val() : {});
+                    }
 
-                    // Pasang listener SETELAH initial read/merge selesai.
+                    // Terapkan snapshot cloud terlebih dahulu. Listener dipasang setelah hydration.
+                    AKSARA_FIREBASE_SYNC_KEYS.forEach(key => {
+                        if (Object.prototype.hasOwnProperty.call(remote,key)) aksaraFbApply(key, remote[key]);
+                    });
+
+                    // Pasang listener SETELAH initial read/hydration selesai.
                     AKSARA_FIREBASE_SYNC_KEYS.forEach(key => {
                         const ref = AKSARA_FIREBASE.db.ref(key);
                         const handler = snp => aksaraFbApply(key, snp.val());
@@ -4023,6 +4045,24 @@ if ('serviceWorker' in navigator) {
             </div>
         );
 
+        const FirebaseSyncIndicator = () => {
+            const [status,setStatus] = React.useState(AKSARA_FIREBASE.started ? 'connected' : 'syncing');
+            React.useEffect(() => {
+                const onStatus = e => setStatus(e.detail?.connected ? 'connected' : 'offline');
+                const onError = () => setStatus('offline');
+                const onChange = () => setStatus('connected');
+                window.addEventListener('aksara:firebase-status', onStatus);
+                window.addEventListener('aksara:firebase-error', onError);
+                window.addEventListener('aksara:firebase-changed', onChange);
+                return () => {
+                    window.removeEventListener('aksara:firebase-status', onStatus);
+                    window.removeEventListener('aksara:firebase-error', onError);
+                    window.removeEventListener('aksara:firebase-changed', onChange);
+                };
+            }, []);
+            return <SyncStatus status={status} />;
+        };
+
         const SyncStatus = ({ status = 'connected' }) => {
             const config = {
                 connected: { color: 'teal', text: 'Tersinkronisasi', bg: 'bg-teal-50', border: 'border-teal-100', dot: 'bg-aksara-teal', ping: true },
@@ -4646,7 +4686,7 @@ if ('serviceWorker' in navigator) {
                                 <span className="font-heading font-bold text-gray-800 text-base capitalize">Portal {user?.role?.toLowerCase().replace('_', ' ')}</span>
                             </div>
                             <div className="flex items-center gap-4">
-                                <SyncStatus status="connected" />
+                                <FirebaseSyncIndicator />
                                 <div className="h-6 w-px bg-gray-200"></div>
                                 {}
                                 <NotificationCenter />
@@ -4772,32 +4812,42 @@ if ('serviceWorker' in navigator) {
         };
         const persistDurableCollection = (key, rows) => {
             const data = Array.isArray(rows) ? rows : [];
+            // localStorage hanya cache/offline fallback. Untuk koleksi Firebase, sinkronisasi cloud
+            // dijalankan terpisah dan tidak boleh dianggap berhasil hanya karena cache lokal berubah.
             try {
                 localStorage.setItem(`aksara_${key}`, JSON.stringify(data));
                 localStorage.setItem(`master_${key}`, JSON.stringify(data));
             } catch(e) {}
-            if (AKSARA_FIREBASE_SYNC_KEYS.includes(key) && AKSARA_FIREBASE.auth?.currentUser && !AKSARA_FIREBASE.applying) {
-                try {
-                    if (!AKSARA_FIREBASE.persistTimers) AKSARA_FIREBASE.persistTimers = {};
-                    clearTimeout(AKSARA_FIREBASE.persistTimers[key]);
-                    AKSARA_FIREBASE.persistTimers[key] = setTimeout(() => {
-                        aksaraFbPersistCollection(key, data).catch(err => console.warn('[AKSARA] Auto-sync', key, err));
-                    }, 0);
-                } catch(e) {}
+            if (AKSARA_FIREBASE_SYNC_KEYS.includes(key) && !AKSARA_FIREBASE.applying) {
+                if (!AKSARA_FIREBASE.persistTimers) AKSARA_FIREBASE.persistTimers = {};
+                clearTimeout(AKSARA_FIREBASE.persistTimers[key]);
+                AKSARA_FIREBASE.persistTimers[key] = setTimeout(() => {
+                    aksaraFbPersistCollection(key, data).catch(err => console.warn('[AKSARA] Auto-sync gagal', key, err));
+                }, 0);
             }
         };
         const aksaraFbPersistCollection = async (key, rows) => {
             const data = Array.isArray(rows) ? rows : [];
+            if (!AKSARA_FIREBASE_SYNC_KEYS.includes(key)) {
+                try {
+                    localStorage.setItem(`aksara_${key}`, JSON.stringify(data));
+                    localStorage.setItem(`master_${key}`, JSON.stringify(data));
+                } catch(e) {}
+                return true;
+            }
             try {
-                persistDurableCollection(key, data);
-                localStorage.setItem(`aksara_firebase_${key}`, JSON.stringify(data));
-            } catch(e) {}
-            try {
-                await aksaraFbReady();
-                if (!AKSARA_FIREBASE.auth?.currentUser) return false;
+                await aksaraFbRequireReady();
                 DEMO_DB[key] = data;
                 aksaraFbInstall();
-                return await aksaraFbWrite(key);
+                await aksaraFbWrite(key);
+                // Cache hanya diperbarui setelah cloud menerima perubahan.
+                try {
+                    localStorage.setItem(`aksara_${key}`, JSON.stringify(data));
+                    localStorage.setItem(`master_${key}`, JSON.stringify(data));
+                    localStorage.setItem(`aksara_firebase_${key}`, JSON.stringify(DEMO_DB[key] || data));
+                } catch(e) {}
+                window.dispatchEvent(new CustomEvent('aksara:firebase-status',{detail:{connected:true,uid:AKSARA_FIREBASE.uid,lastSync:new Date().toISOString(),key}}));
+                return true;
             } catch (e) {
                 console.warn('[AKSARA] Persist Firebase gagal', key, e);
                 window.dispatchEvent(new CustomEvent('aksara:firebase-error',{detail:{error:e,key}}));
@@ -6197,7 +6247,7 @@ if ('serviceWorker' in navigator) {
                 </div>
                 <div className="text-xs text-gray-500">Filter Sekolah terhubung ke master sekolah terdaftar. Filter Mata Pelajaran hanya menampilkan mapel yang memiliki jadwal ujian pada sekolah yang dipilih.</div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{[['Total Peserta',counts.total],['Belum Mengerjakan',counts.notStarted],['Sedang Mengerjakan',counts.inProgress],['Selesai',counts.finished]].map(([label,value])=><div key={label} className="bg-white p-4 rounded-xl border"><p className="text-xs text-gray-500">{label}</p><p className="text-2xl font-bold">{value}</p></div>)}</div>
-                <div className="flex items-center justify-between bg-white p-6 rounded-xl border border-gray-200 shadow-sm"><div><h2 className="text-xl font-heading font-bold text-gray-900">Monitoring CAT Realtime</h2><p className="text-gray-500 text-sm">{selectedSchools.length===1 ? (schoolOptions.find(s=>String(s.id)===selectedSchools[0])?.name||'Sekolah') : 'Semua sekolah terpilih'} • {rows.length} peserta</p></div><SyncStatus status="connected" /></div>
+                <div className="flex items-center justify-between bg-white p-6 rounded-xl border border-gray-200 shadow-sm"><div><h2 className="text-xl font-heading font-bold text-gray-900">Monitoring CAT Realtime</h2><p className="text-gray-500 text-sm">{selectedSchools.length===1 ? (schoolOptions.find(s=>String(s.id)===selectedSchools[0])?.name||'Sekolah') : 'Semua sekolah terpilih'} • {rows.length} peserta</p></div><FirebaseSyncIndicator /></div>
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto"><div className="p-4 border-b border-gray-200 bg-gray-50 font-semibold text-gray-700">Daftar Status Peserta Realtime</div><table className="w-full text-left border-collapse"><thead><tr className="bg-gray-50 border-b text-xs uppercase text-gray-500 font-semibold"><th className="px-6 py-4">Peserta</th><th className="px-6 py-4">Sekolah</th><th className="px-6 py-4">Mata Pelajaran</th><th className="px-6 py-4">Status</th><th className="px-6 py-4">Progres</th><th className="px-6 py-4">Nilai</th><th className="px-6 py-4 text-right">Aksi</th></tr></thead><tbody className="divide-y text-sm">{rows.length===0?<tr><td colSpan="7" className="p-10 text-center text-gray-500">Belum ada peserta ujian sesuai sekolah dan mata pelajaran yang dipilih.</td></tr>:rows.map(r=>{const school=schoolMap.get(r.studentSchoolId);const subject=subjects.find(s=>String(s.id)===String(r.subjectId));const answers=(DEMO_DB.answers||[]).filter(a=>String(a.attemptId||'')===String(r.attempt?.id||''));return <tr key={`${r.participant.id || r.student.id}-${r.schedule.id}`}><td className="px-6 py-4 font-medium">{r.student.name||r.student.id}<span className="block text-xs text-gray-500">{r.student.nisn||r.student.nis||r.student.id}</span></td><td className="px-6 py-4 text-xs">{school?.name||'-'}</td><td className="px-6 py-4 text-xs">{subject?.name||'-'}</td><td className="px-6 py-4"><span className="px-2 py-1 rounded-full bg-gray-100 text-xs">{r.status}</span></td><td className="px-6 py-4 text-xs">{answers.length} jawaban</td><td className="px-6 py-4 text-xs font-semibold">{r.result?.percentage ?? '-'}</td><td className="px-6 py-4 text-right">{r.attempt?<button onClick={()=>{r.attempt.status='FORCE_SUBMITTED';r.attempt.forceSubmitted=true;r.attempt.forceSubmittedAt=new Date().toISOString();mockApiService.internalAutoGrade(r.attempt.id);setRefreshKey(v=>v+1)}} className="text-xs text-red-600">Force Submit</button>:<span className="text-xs text-gray-400">-</span>}</td></tr>})}</tbody></table></div>
             </div>;
         };
@@ -7416,33 +7466,38 @@ if ('serviceWorker' in navigator) {
             const [isCheckingAuth, setIsCheckingAuth] = React.useState(true);
 
             React.useEffect(() => {
-                const storedToken = localStorage.getItem('aksara_token');
-                const storedUser = localStorage.getItem('aksara_user');
-                if (storedToken && storedUser) {
+                let alive = true;
+                const boot = async () => {
                     try {
-                        const parsedUser = JSON.parse(storedUser);
-                        const restore = () => {
-                            const canonicalUser = hydrateStudentAccount(parsedUser);
-                            setUser(canonicalUser);
-                            setToken(storedToken);
-                            if (canonicalUser.role === 'ADMIN_SUPER') setRoute('admin/dashboard');
-                            else if (canonicalUser.role === 'GURU') setRoute('guru/dashboard');
-                            else if (canonicalUser.role === 'MURID') setRoute('murid/dashboard');
-                            else if (canonicalUser.role === 'ORANG_TUA') setRoute('orangtua/dashboard');
-                        };
-                        mockApiService.getDashboardData(storedToken, parsedUser.role)
-                            .then(restore)
-                            .catch(() => {
-                                // Token lokal hanya dipakai untuk memulihkan UI; Firebase menjadi sumber data utama.
-                                restore();
-                            })
-                            .finally(() => setIsCheckingAuth(false));
+                        // Jangan merender portal dari cache sebelum snapshot Firebase selesai.
+                        if (window.__AKSARA_FIREBASE_BOOT_PROMISE) await window.__AKSARA_FIREBASE_BOOT_PROMISE;
                     } catch (e) {
-                        setIsCheckingAuth(false);
+                        console.error('[AKSARA] Firebase boot gagal:', e);
                     }
-                } else {
-                    setIsCheckingAuth(false);
-                }
+                    if (!alive) return;
+                    const storedToken = localStorage.getItem('aksara_token');
+                    const storedUser = localStorage.getItem('aksara_user');
+                    if (storedToken && storedUser) {
+                        try {
+                            const parsedUser = JSON.parse(storedUser);
+                            const restore = () => {
+                                const canonicalUser = hydrateStudentAccount(parsedUser);
+                                setUser(canonicalUser);
+                                setToken(storedToken);
+                                if (canonicalUser.role === 'ADMIN_SUPER') setRoute('admin/dashboard');
+                                else if (canonicalUser.role === 'GURU') setRoute('guru/dashboard');
+                                else if (canonicalUser.role === 'MURID') setRoute('murid/dashboard');
+                                else if (canonicalUser.role === 'ORANG_TUA') setRoute('orangtua/dashboard');
+                            };
+                            await mockApiService.getDashboardData(storedToken, parsedUser.role).then(restore).catch(restore);
+                        } catch (e) {
+                            console.warn('[AKSARA] Restore sesi:', e);
+                        }
+                    }
+                    if (alive) setIsCheckingAuth(false);
+                };
+                boot();
+                return () => { alive = false; };
             }, []);
 
             React.useEffect(() => {
