@@ -415,10 +415,10 @@ var DEMO_DB = {
                 const rows = [...parseArray(`aksara_${key}`), ...parseArray(`master_${key}`), ...parseArray(`aksara_firebase_${key}`)];
                 if (!rows.length) return;
                 const seen = new Set();
-                DEMO_DB[key] = rows.filter(item => {
+                DEMO_DB[key] = aksaraDeduplicate(key, rows.filter(item => {
                     const id = String(item?.id || item?.userId || item?.studentId || item?.teacherId || item?.parentId || item?.scheduleId || item?.questionId || item?.attemptId || item?.nisn || item?.username || JSON.stringify(item)).trim();
                     if (seen.has(id)) return false; seen.add(id); return true;
-                });
+                }));
             });
         } catch(e) { console.warn('[AKSARA] Pemulihan data lokal dilewati:', e); }
 
@@ -529,7 +529,7 @@ var DEMO_DB = {
                 } else {
                     const remoteMap = value && typeof value === 'object' ? value : {};
                     AKSARA_FIREBASE.remoteMaps[key] = JSON.parse(JSON.stringify(remoteMap));
-                    DEMO_DB[key] = aksaraFbArray(remoteMap);
+                    DEMO_DB[key] = aksaraDeduplicate(key, aksaraFbArray(remoteMap));
                 }
                 try {
                     localStorage.setItem(`aksara_firebase_${key}`, JSON.stringify(DEMO_DB[key]));
@@ -551,7 +551,7 @@ var DEMO_DB = {
                     await AKSARA_FIREBASE.db.ref(key).set(aksaraFbSafe(DEMO_DB[key] || {}));
                     return true;
                 }
-                const localMap = aksaraFbMap(key, DEMO_DB[key] || []);
+                const canonicalRows = aksaraDeduplicate(key, DEMO_DB[key] || []); DEMO_DB[key] = canonicalRows; const localMap = aksaraFbMap(key, canonicalRows);
                 const baseline = AKSARA_FIREBASE.remoteMaps[key] || {};
                 const snap = await AKSARA_FIREBASE.db.ref(key).once('value');
                 const latest = snap.val() && typeof snap.val() === 'object' ? snap.val() : {};
@@ -4718,9 +4718,47 @@ if ('serviceWorker' in navigator) {
         const canonicalImport = (row, kind) => { const spec=importAliases[kind]; const out={}; Object.entries(row||{}).forEach(([key,value])=>{ if(!/(password|token|secret|apikey|api_key|credential)/i.test(key)) out[key]=safeImportValue(value); }); const pick=(keys)=>keys.map(k=>out[k]).find(v=>v); out.id=pick(spec.id)||pick(spec.natural)||`${kind.slice(0,-1).toUpperCase()}-${Date.now()}-${Math.random().toString(36).slice(2,7)}`; out.name=pick(['nama','namaSekolah','name'])||''; return out; };
         const MasterImportPanel = ({ kind }) => { const spec=importAliases[kind]; const { user }=React.useContext(AppContext); const allowed=user?.role==='ADMIN_SUPER' && !!spec?.entity; const [open,setOpen]=React.useState(false); const [file,setFile]=React.useState(null); const [rows,setRows]=React.useState([]); const [errors,setErrors]=React.useState([]); const [mode,setMode]=React.useState('merge'); const [notice,setNotice]=React.useState(''); const [jsonText,setJsonText]=React.useState(''); const [validated,setValidated]=React.useState(false); const inputRef=React.useRef(null); const exampleRecord=kind==='schools'?{id:'ISI_SCHOOL_ID',name:'ISI_NAMA_SEKOLAH',npsn:'ISI_NPSN',district:'ISI_KECAMATAN',address:'ISI_ALAMAT',principalName:'ISI_NAMA_KEPALA_SEKOLAH',phone:'ISI_NOMOR_TELEPON',status:'ACTIVE'}:kind==='teachers'?{id:'ISI_TEACHER_ID',name:'ISI_NAMA_GURU',nip:'ISI_NIP_ATAU_NUPTK',email:'ISI_EMAIL',phone:'ISI_NOMOR_TELEPON',schoolId:'ISI_SCHOOL_ID',district:'ISI_KECAMATAN',username:'ISI_USERNAME',status:'ACTIVE'}:{id:'ISI_STUDENT_ID',name:'ISI_NAMA_MURID',nisn:'ISI_NISN',schoolId:'ISI_SCHOOL_ID',classId:'ISI_CLASS_ID',parentName:'ISI_NAMA_WALI',status:'ACTIVE',username:'ISI_USERNAME'}; const example=JSON.stringify({schemaVersion:'1.0',entity:spec.entity,records:[exampleRecord],metadata:{instructions:'Ganti semua nilai ISI_ sebelum Validasi JSON.'}},null,2); const validateJson=()=>{try{const payload=JSON.parse(jsonText); if(!payload||payload.schemaVersion!=='1.0'||!Array.isArray(payload.records)||payload.entity!==spec.entity) throw new Error(`Struktur wajib: schemaVersion "1.0", entity "${spec.entity}" untuk menu ${spec.label}, dan records berupa array.`); const placeholders=payload.records.flatMap((r,i)=>Object.entries(r).filter(([,v])=>typeof v==='string'&&v.startsWith('ISI_')).map(([k])=>`Baris ${i+1}, field ${k}: ganti placeholder terlebih dahulu`)); if(placeholders.length) throw new Error(placeholders.join(' · ')); if(!payload||payload.schemaVersion!=='1.0'||!Array.isArray(payload.records)||payload.entity!==spec.entity) throw new Error(`Struktur wajib: schemaVersion "1.0", entity "${spec.entity}" untuk menu ${spec.label}, dan records berupa array.`); const parsed=payload.records.map(r=>canonicalImport(r,kind)); const bad=parsed.flatMap((r,i)=>spec.required.filter(k=>!r[k]&&!r.name).map(k=>`Baris ${i+1}, field ${k}: wajib diisi`)); setFile({name:'JSON copy-paste'}); setRows(parsed); setErrors(bad); setValidated(true); setNotice('');}catch(error){setValidated(false);setRows([]);setErrors([`JSON tidak valid: ${error.message}`]);setNotice('');}}; const read=async e=>{const f=e.target.files?.[0];e.target.value='';if(!f)return;if(f.size>25*1024*1024)return setNotice('File maksimal 25 MB.');if(!/\\.(json|xlsx|xls)$/i.test(f.name))return setNotice('Gunakan JSON atau Excel.');try{let raw=[];if(/json$/i.test(f.name)){const p=JSON.parse(await f.text());raw=Array.isArray(p)?p:(p.records||[]);}else{const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});raw=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});}const parsed=raw.map(r=>canonicalImport(r,kind));const bad=parsed.map((r,i)=>spec.required.some(k=>!r[k]&&!r.name)?`Baris ${i+2}: nama wajib diisi`:null).filter(Boolean);setFile(f);setRows(parsed);setErrors(bad);setNotice('');setOpen(true);}catch(err){setNotice('File tidak dapat dibaca: '+err.message);}}; const downloadJson=()=>{const fields=kind==='schools'?['schoolId','kodeSekolah','namaSekolah','npsn','alamat','provinsi','kabupatenKota','kecamatan','email','telepon','kepalaSekolah','status']:kind==='teachers'?['teacherId','userId','nip','nuptk','nama','email','username','telepon','schoolId','subjectIds','classIds','role','status']:['studentId','userId','nis','nisn','nama','email','username','tanggalLahir','jenisKelamin','schoolId','classId','parentIds','status'];const blob=new Blob([JSON.stringify({schemaVersion:1,entity:spec.entity,exportedAt:new Date().toISOString(),records:fields.reduce((o,k)=>(o[k]='',o),{}),metadata:{fields,instructions:'Isi records sebagai array. Jangan sertakan password, token, secret, API key, atau kredensial.'}},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`format-${kind}.json`;a.click();}; const downloadXlsx=()=>{const fields=kind==='schools'?['schoolId','kodeSekolah','namaSekolah','npsn','alamat','provinsi','kabupatenKota','kecamatan','email','telepon','kepalaSekolah','status']:kind==='teachers'?['teacherId','userId','nip','nuptk','nama','email','username','telepon','schoolId','subjectIds','classIds','role','status']:['studentId','userId','nis','nisn','nama','email','username','tanggalLahir','jenisKelamin','schoolId','classId','parentIds','status'];const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([fields]),'Data');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['Petunjuk'],['Satu baris untuk satu record. Gunakan ID permanen atau kunci alami. Jangan isi password, token, secret, API key, atau kredensial.']]),'Petunjuk');XLSX.writeFile(wb,`template-${kind}.xlsx`);}; const apply=()=>{if(!allowed||errors.length)return;const target=DEMO_DB[spec.target]||[];const index=new Map((mode==='replace'?[]:target).map(x=>[String(x.id),x]));let added=0,updated=0;rows.forEach(r=>{const old=index.get(String(r.id));index.set(String(r.id),old?{...old,...r}:r);old?updated++:added++;});DEMO_DB[spec.target]=[...index.values()];persistDurableCollection(spec.target, DEMO_DB[spec.target]);aksaraFbPersistCollection(spec.target, DEMO_DB[spec.target]).catch(e=>console.warn('[AKSARA] Sinkron impor:',e));try{localStorage.setItem(`aksara_${spec.target}`,JSON.stringify(DEMO_DB[spec.target]));const logs=JSON.parse(localStorage.getItem(IMPORT_LOG_KEY)||'[]');logs.unshift({actorId:user.id,actorName:user.name,createdAt:new Date().toISOString(),entity:spec.entity,fileName:file?.name,mode,added,updated,errors:errors.length});localStorage.setItem(IMPORT_LOG_KEY,JSON.stringify(logs.slice(0,100)));}catch(e){}setOpen(false);setNotice(`Impor ${spec.label} selesai: ${added} ditambah, ${updated} diperbarui.`);}; return <div className="mt-4 flex flex-wrap gap-2"><button disabled={!allowed} onClick={()=>{setJsonText('');setRows([]);setErrors([]);setValidated(false);setOpen(true)}} className="px-3 py-2 bg-aksara-600 text-white rounded-lg text-sm disabled:opacity-50">Impor JSON</button><button disabled={!allowed} onClick={()=>inputRef.current?.click()} className="px-3 py-2 bg-aksara-600 text-white rounded-lg text-sm disabled:opacity-50">Impor Excel</button><button onClick={downloadXlsx} className="px-3 py-2 border rounded-lg text-sm">Unduh Template Excel</button><input ref={inputRef} type="file" accept=".json,.xlsx,.xls,application/json" onChange={read} className="hidden" />{notice&&<span role="status" className="text-sm text-teal-700 self-center">{notice}</span>}{open&&<div role="dialog" aria-modal="true" className="fixed inset-0 z-[999] flex items-start sm:items-center justify-center p-2 sm:p-4 bg-gray-900/50 overflow-y-auto"><div className="bg-white rounded-2xl p-4 sm:p-6 w-full max-w-2xl max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden"><div className="flex items-start justify-between gap-3 shrink-0"><h3 className="text-xl font-bold break-words">Impor JSON — {spec.label}</h3><button type="button" aria-label="Tutup" onClick={()=>setOpen(false)} className="shrink-0 text-2xl leading-none text-gray-500 hover:text-gray-900">×</button></div><p className="text-sm text-gray-500 mt-2 shrink-0">Tempel JSON resmi di bawah. Contoh ini hanya instruksi dan tidak akan diimpor.</p><div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1"><pre aria-label={`Contoh format JSON ${spec.label}`} tabIndex="0" className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-indigo-100 bg-indigo-50/50 p-3 font-mono text-xs text-gray-700 select-text">{example}</pre><p className="text-xs text-gray-500 mt-2">Contoh di atas hanya petunjuk dan dapat diseleksi lalu disalin manual. Field wajib: {spec.required.join(', ')}. Field lain pada contoh bersifat opsional. Ganti semua placeholder ISI_ sebelum Validasi JSON; contoh tidak mengisi atau menyimpan editor secara otomatis.</p><textarea aria-label="JSON untuk diimpor" value={jsonText} onChange={e=>{setJsonText(e.target.value);setValidated(false)}} placeholder="Tempel JSON Anda di sini..." className="mt-3 w-full min-h-48 h-48 resize-y border rounded-lg p-3 font-mono text-xs"/><p className="text-sm text-gray-500 mt-3">{file?.name} · {rows.length} record · {errors.length} error fatal</p>{errors.length>0&&<div className="mt-3 p-3 bg-red-50 text-red-700 rounded-lg text-sm">{errors.join(' · ')}</div>}<label className="block mt-4 text-sm font-medium">Mode<select value={mode} onChange={e=>setMode(e.target.value)} className="mt-1 w-full border rounded-lg p-2"><option value="merge">Gabungkan / Upsert</option>{allowed&&<option value="replace">Ganti data</option>}</select></label><div className="max-h-48 overflow-auto mt-4 border rounded-lg"><pre className="p-3 text-xs">{JSON.stringify(rows.slice(0,5),null,2)}</pre></div></div><div className="flex flex-wrap justify-end gap-3 mt-5 pt-4 border-t shrink-0"><button onClick={validateJson} className="px-4 py-2 border border-aksara-600 text-aksara-600 rounded-lg">Validasi JSON</button><button onClick={()=>setOpen(false)} className="px-4 py-2 bg-gray-100 rounded-lg">Batal</button>{errors.length>0&&<button onClick={()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([errors.join('\\n')],{type:'text/plain'}));a.download='laporan-validasi.txt';a.click();}} className="px-4 py-2 border rounded-lg">Unduh Laporan Validasi</button>}<button disabled={!validated||errors.length>0||!allowed} onClick={apply} className="px-4 py-2 bg-aksara-600 text-white rounded-lg disabled:opacity-50">Terapkan Impor</button></div></div></div>}</div>; };
 
+        // CANONICAL DATA: satu entitas = satu record. Prioritas identitas: id -> NPSN/username/identifier.
+        const aksaraCanonicalKey = (key, item) => {
+            const x = item || {};
+            const explicit = String(x.id || x.userId || x.studentId || x.teacherId || x.parentId || x.scheduleId || x.questionId || x.attemptId || x.resultId || '').trim().toLowerCase();
+            if (explicit) return `id:${explicit}`;
+            if (key === 'schools') {
+                const npsn = String(x.npsn || x.NPSN || '').trim().toLowerCase();
+                if (npsn) return `npsn:${npsn}`;
+                const name = String(x.name || x.schoolName || '').trim().replace(/\\s+/g,' ').toLowerCase();
+                return name ? `school:${name}` : '';
+            }
+            if (key === 'students') return `student:${String(x.schoolId||x.sekolahId||'').trim().toLowerCase()}:${String(x.nisn||x.nis||'').trim().toLowerCase()}`;
+            if (key === 'teachers') return `teacher:${String(x.username||x.nip||x.nuptk||x.email||'').trim().toLowerCase()}`;
+            if (key === 'users') return `user:${String(x.username||x.email||'').trim().toLowerCase()}`;
+            return JSON.stringify(x);
+        };
+        const aksaraDeduplicate = (key, rows) => {
+            const map = new Map();
+            (Array.isArray(rows) ? rows : []).forEach(item => {
+                if (!item || typeof item !== 'object') return;
+                const k = aksaraCanonicalKey(key,item) || `fallback:${JSON.stringify(item)}`;
+                const old = map.get(k);
+                // Record terbaru/lebih lengkap menjadi wakil tunggal.
+                if (!old) map.set(k,{...item});
+                else {
+                    const oldScore = Object.values(old).filter(v=>v!==''&&v!=null).length;
+                    const newScore = Object.values(item).filter(v=>v!==''&&v!=null).length;
+                    map.set(k,newScore>=oldScore?{...old,...item}:{...item,...old});
+                }
+            });
+            return [...map.values()];
+        };
+        const aksaraCanonicalizeAll = () => {
+            AKSARA_FIREBASE_SYNC_KEYS.filter(k=>k!=='systemHealth').forEach(key=>{
+                DEMO_DB[key] = aksaraDeduplicate(key, DEMO_DB[key] || []);
+            });
+        };
+
         const AdminSchools = () => {
             const [schools, setSchools] = React.useState(() => {
-                try { return JSON.parse(localStorage.getItem('aksara_schools') || 'null') || DEMO_DB.schools.map(s => ({ ...s })); } catch (e) { return DEMO_DB.schools.map(s => ({ ...s })); }
+                try { return aksaraDeduplicate('schools', mergeCollectionRecords('schools')).map(s => ({ ...s })); } catch (e) { return aksaraDeduplicate('schools', DEMO_DB.schools).map(s => ({ ...s })); }
             });
             const [search, setSearch] = React.useState('');
             const [district, setDistrict] = React.useState('');
@@ -4733,7 +4771,7 @@ if ('serviceWorker' in navigator) {
             const filtered = schools.filter(s => (!search || `${s.name} ${s.npsn}`.toLowerCase().includes(search.toLowerCase())) && (!district || s.district === district) && (!status || s.status === status));
             const openModal = (school = null) => { setModal(school ? 'edit' : 'add'); setError(''); setForm(school ? { ...form, ...school } : { name: '', npsn: '', district: '', level: '', address: '', principalName: '', phone: '', status: 'ACTIVE' }); };
             const closeModal = () => { setModal(null); setError(''); };
-            const saveSchool = async (e) => { e.preventDefault(); const name = form.name.trim(), npsn = String(form.npsn ?? '').trim(); if (!name || !npsn) return setError('Nama Sekolah dan NPSN wajib diisi.'); const next = { ...form, id: form.id || `SCH-${Date.now()}`, name: form.name.trim(), npsn: form.npsn.trim(), updatedAt:new Date().toISOString() }; const updated = modal === 'edit' ? schools.map(s => s.id === next.id ? next : s) : [...schools, next]; setSchools(updated); DEMO_DB.schools = updated; persistDurableCollection('schools', updated); await aksaraFbPersistCollection('schools', updated); window.dispatchEvent(new CustomEvent('aksara:schools-changed')); closeModal(); setNotice('Data sekolah berhasil disimpan dan disinkronkan ke Firebase.'); setTimeout(() => setNotice(''), 3000); };
+            const saveSchool = async (e) => { e.preventDefault(); const name = form.name.trim(), npsn = String(form.npsn ?? '').trim(); if (!name || !npsn) return setError('Nama Sekolah dan NPSN wajib diisi.'); const next = { ...form, id: form.id || `SCH-${Date.now()}`, name: form.name.trim(), npsn: form.npsn.trim(), updatedAt:new Date().toISOString() }; const updated = aksaraDeduplicate('schools', modal === 'edit' ? schools.map(s => s.id === next.id ? next : s) : [...schools, next]); setSchools(updated); DEMO_DB.schools = updated; const ok = await aksaraFbPersistCollection('schools', updated); if (!ok) return setError('Gagal menyimpan data sekolah ke Firebase. Data belum dinyatakan tersimpan.'); persistDurableCollection('schools', updated); window.dispatchEvent(new CustomEvent('aksara:schools-changed')); closeModal(); setNotice('Data sekolah berhasil disimpan dan disinkronkan ke Firebase.'); setTimeout(() => setNotice(''), 3000); };
             const deleteSchool = async (school) => { const updated = schools.filter(s => s.id !== school.id); setSchools(updated); DEMO_DB.schools = updated; persistDurableCollection('schools', updated); await aksaraFbPersistCollection('schools', updated); await aksaraFbDeleteRecord('schools', school.id); window.dispatchEvent(new CustomEvent('aksara:schools-changed')); setNotice('Data sekolah berhasil dihapus dan disinkronkan.'); };
             const removeParent = (parent) => {
                 if (!window.confirm(`Hapus data orang tua/wali ${parent.name || ''}?`)) return;
@@ -7152,14 +7190,162 @@ if ('serviceWorker' in navigator) {
             const field = (key, label) => <label className="block text-sm font-medium">{label}<div className="relative mt-1"><input required type={visible[key] ? 'text' : 'password'} value={form[key]} onChange={e=>setForm({...form,[key]:e.target.value})} autoComplete={key === 'current' ? 'current-password' : 'new-password'} className="w-full border rounded-lg p-2.5 pr-20" /><button type="button" onClick={()=>setVisible({...visible,[key]:!visible[key]})} className="absolute right-2 top-2 text-xs text-aksara-600">{visible[key] ? 'Sembunyikan' : 'Tampilkan'}</button></div></label>;
             return <section className="bg-white rounded-xl border p-5"><h3 className="font-bold text-lg">Ubah Password Admin Utama</h3><p className="text-sm text-gray-500 mt-1">Khusus akun Admin Super Utama yang sedang login.</p><button type="button" onClick={()=>setOpen(true)} className="mt-4 px-4 py-2 bg-aksara-600 text-white rounded-lg">Ubah Password Admin Utama</button>{open&&<div role="dialog" aria-modal="true" className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-gray-900/50"><form onSubmit={submit} className="bg-white rounded-2xl p-6 w-full max-w-md"><h4 className="text-xl font-bold">Ubah Password Admin Utama</h4><p className="text-xs text-gray-500 mt-2">Isi password baru dan konfirmasinya dengan nilai yang sama.</p><div className="space-y-4 mt-5">{field('current','Password saat ini')}{field('next','Password baru')}{field('confirm','Konfirmasi password baru')}</div>{!form.next&&<p className="text-sm text-red-600 mt-3">Password baru wajib diisi.</p>}{!form.confirm&&<p className="text-sm text-red-600 mt-2">Konfirmasi password baru wajib diisi.</p>}{form.confirm&&form.next!==form.confirm&&<p className="text-sm text-red-600 mt-2">Konfirmasi password baru tidak sama.</p>}{error&&<p role="alert" className="text-sm text-red-600 mt-3">{error}</p>}<div className="flex justify-end gap-3 mt-6"><button type="button" onClick={close} disabled={saving} className="px-4 py-2 bg-gray-100 rounded-lg">Batal</button><button type="submit" disabled={!valid||saving} className="px-4 py-2 bg-aksara-600 text-white rounded-lg disabled:opacity-50">{saving?'Menyimpan...':'Simpan Password Baru'}</button></div></form></div>}</section>;
         };
+        // ================================================================
+        // FIREBASE DATA CONSOLIDATOR
+        // One-time/manual cleanup for duplicate records already stored in
+        // Firebase. It remaps foreign-key references before removing losers.
+        // ================================================================
+        const aksaraConsolidationIdentity = (key, item) => {
+            const x = item || {};
+            const n = v => String(v ?? '').trim().toLowerCase().replace(/\s+/g,' ');
+            const pick = (...v) => v.map(n).find(Boolean) || '';
+            // Explicit IDs are only safe as identity for transactional data.
+            // Master data gets a business identity so two different Firebase
+            // child keys representing the same entity can be consolidated.
+            if (key === 'schools') return pick(x.npsn,x.NPSN) ? `npsn:${pick(x.npsn,x.NPSN)}` : `school:${pick(x.name,x.schoolName)}`;
+            if (key === 'academicYears') return `year:${pick(x.schoolId,x.sekolahId)}:${pick(x.name,x.yearName,x.tahunAjaran)}`;
+            if (key === 'teachers') return `teacher:${pick(x.username,x.nip,x.nuptk,x.email,x.name)}`;
+            if (key === 'students') return `student:${pick(x.schoolId,x.sekolahId)}:${pick(x.nisn,x.nis,x.username,x.name)}`;
+            if (key === 'parents') return `parent:${pick(x.username,x.email,x.phone,x.phoneNumber,x.name)}`;
+            if (key === 'classes') return `class:${pick(x.schoolId,x.sekolahId)}:${pick(x.name,x.className,x.namaKelas)}`;
+            if (key === 'subjects') return `subject:${pick(x.code,x.kode,x.name,x.subjectName,x.nama)}`;
+            if (key === 'questionBanks') return `qbank:${pick(x.id,x.questionBankId)}:${pick(x.name,x.title,x.subjectId)}`;
+            if (key === 'examPackages') return `package:${pick(x.id,x.packageId)}:${pick(x.name,x.title)}:${pick(x.subjectId,x.mapelId)}`;
+            if (key === 'examSchedules') return `schedule:${pick(x.schoolId,x.sekolahId)}:${pick(x.packageId,x.examId,x.questionSetId)}:${pick(x.date,x.startTime,x.start_time)}`;
+            if (key === 'parent_student') return `parent_student:${pick(x.parentId,x.idParent)}:${pick(x.studentId,x.idStudent)}`;
+            // For attempts, answers, results, participants and questions,
+            // an explicit permanent ID is the safest identity.
+            const explicit = pick(x.id,x.userId,x.studentId,x.teacherId,x.parentId,x.questionId,x.scheduleId,x.attemptId,x.resultId,x.participantId);
+            if (explicit) return `id:${explicit}`;
+            return '';
+        };
+
+        const aksaraConsolidationScore = item => {
+            const x = item || {};
+            const fields = Object.entries(x).filter(([k,v]) => v !== '' && v !== null && v !== undefined && k !== 'password' && k !== 'kataSandi' && k !== 'token');
+            const updated = new Date(x.updatedAt || x.updated_at || x.modifiedAt || x.createdAt || 0).getTime() || 0;
+            return { completeness: fields.length, updated };
+        };
+
+        const aksaraChooseCanonical = (a,b) => {
+            const sa = aksaraConsolidationScore(a), sb = aksaraConsolidationScore(b);
+            if (sb.updated !== sa.updated) return sb.updated > sa.updated ? b : a;
+            return sb.completeness >= sa.completeness ? { ...a, ...b } : { ...b, ...a };
+        };
+
+        const aksaraReplaceReferences = (key, item, idMaps) => {
+            const x = { ...(item || {}) };
+            const replace = (field, map) => { if (x[field] != null && map?.[String(x[field])]) x[field] = map[String(x[field])]; };
+            const schoolFields = ['schoolId','sekolahId','school_id','sekolah_id'];
+            const studentFields = ['studentId','muridId','student_id','murid_id'];
+            const teacherFields = ['teacherId','guruId','teacher_id','guru_id'];
+            const parentFields = ['parentId','waliId','parent_id','wali_id'];
+            const classFields = ['classId','kelasId','class_id','kelas_id'];
+            schoolFields.forEach(f=>replace(f,idMaps.schools));
+            studentFields.forEach(f=>replace(f,idMaps.students));
+            teacherFields.forEach(f=>replace(f,idMaps.teachers));
+            parentFields.forEach(f=>replace(f,idMaps.parents));
+            classFields.forEach(f=>replace(f,idMaps.classes));
+            return x;
+        };
+
+        const aksaraFbConsolidate = async ({dryRun=false}={}) => {
+            await aksaraFbRequireReady();
+            if (!AKSARA_FIREBASE.auth?.currentUser) throw new Error('Sesi Firebase belum aktif. Silakan login ulang sebagai Admin Super.');
+            await aksaraFbWaitConnected(15000);
+            const report = { scanned:0, duplicateGroups:0, duplicateRecords:0, removed:0, changedReferences:0, collections:{}, dryRun };
+            const raw = {};
+            for (const key of AKSARA_FIREBASE_SYNC_KEYS.filter(k=>k!=='systemHealth')) {
+                const snap = await AKSARA_FIREBASE.db.ref(key).once('value');
+                const val = snap.val();
+                raw[key] = val && typeof val === 'object' ? val : {};
+                const entries = Object.entries(raw[key]);
+                report.scanned += entries.length;
+                const groups = new Map();
+                entries.forEach(([firebaseId,item]) => {
+                    if (!item || typeof item !== 'object') return;
+                    const identity = aksaraConsolidationIdentity(key,item) || `id:${firebaseId}`;
+                    if (!groups.has(identity)) groups.set(identity,[]);
+                    groups.get(identity).push({firebaseId,item});
+                });
+                const dupGroups = [...groups.values()].filter(g=>g.length>1);
+                const dupRecords = dupGroups.reduce((n,g)=>n+g.length-1,0);
+                report.collections[key] = {records:entries.length, duplicateGroups:dupGroups.length, duplicateRecords:dupRecords};
+                report.duplicateGroups += dupGroups.length;
+                report.duplicateRecords += dupRecords;
+            }
+            if (dryRun) return report;
+
+            // Build old-ID -> canonical-ID maps before rewriting anything.
+            const idMaps = {schools:{},students:{},teachers:{},parents:{},classes:{}};
+            const canonicalMaps = {};
+            for (const key of AKSARA_FIREBASE_SYNC_KEYS.filter(k=>k!=='systemHealth')) {
+                const groups = new Map();
+                Object.entries(raw[key] || {}).forEach(([firebaseId,item])=>{
+                    if (!item || typeof item !== 'object') return;
+                    const identity = aksaraConsolidationIdentity(key,item) || `id:${firebaseId}`;
+                    if (!groups.has(identity)) groups.set(identity,[]);
+                    groups.get(identity).push({firebaseId,item});
+                });
+                const out = {};
+                for (const group of groups.values()) {
+                    let winner = group[0];
+                    for (let i=1;i<group.length;i++) {
+                        const preferred = aksaraChooseCanonical(winner.item,group[i].item);
+                        winner = preferred === winner.item ? winner : group[i];
+                        winner = { firebaseId: winner.firebaseId, item: preferred };
+                    }
+                    // Keep one stable Firebase child key. References may use
+                    // either the child key or item.id, so both are remapped.
+                    const canonicalId = winner.firebaseId;
+                    const canonicalItem = { ...(winner.item || {}) };
+                    if (canonicalItem.id && canonicalItem.id !== canonicalId && ['schools','students','teachers','parents','classes'].includes(key)) {
+                        canonicalItem.id = canonicalId;
+                    }
+                    group.forEach(g=>{
+                        if (idMaps[key]?.constructor === Object) {
+                            idMaps[key][g.firebaseId] = canonicalId;
+                            if (g.item?.id) idMaps[key][String(g.item.id)] = canonicalId;
+                        }
+                    });
+                    out[canonicalId] = canonicalItem;
+                }
+                canonicalMaps[key] = out;
+            }
+
+            // Rewrite foreign keys first, then write canonical collections.
+            for (const key of AKSARA_FIREBASE_SYNC_KEYS.filter(k=>k!=='systemHealth')) {
+                const source = canonicalMaps[key] || {};
+                const rewritten = {};
+                Object.entries(source).forEach(([id,item])=>{
+                    const next = aksaraReplaceReferences(key,item,idMaps);
+                    if (JSON.stringify(next) !== JSON.stringify(item)) report.changedReferences++;
+                    rewritten[id] = aksaraFbSafe(next);
+                });
+                // Atomic root replacement per collection removes stale duplicate
+                // child nodes that were physically present in Firebase.
+                if (JSON.stringify(rewritten) !== JSON.stringify(raw[key] || {})) {
+                    await AKSARA_FIREBASE.db.ref(key).set(rewritten);
+                    report.removed += Math.max(0,Object.keys(raw[key]||{}).length-Object.keys(rewritten).length);
+                }
+                AKSARA_FIREBASE.remoteMaps[key] = JSON.parse(JSON.stringify(rewritten));
+                DEMO_DB[key] = aksaraDeduplicate(key,aksaraFbArray(rewritten));
+            }
+            aksaraCanonicalizeAll();
+            aksaraFbInstall();
+            try { localStorage.setItem('aksara_consolidation_last',JSON.stringify({at:new Date().toISOString(),report})); } catch(e) {}
+            window.dispatchEvent(new CustomEvent('aksara:firebase-changed',{detail:{key:'*',source:'consolidation'}}));
+            return report;
+        };
+
         const AdminSettings = () => {
             const { user } = React.useContext(AppContext); const isSuperAdmin = user?.role === 'ADMIN_SUPER';
-            const [settings, setSettings] = React.useState(() => readSettings()); const [notice, setNotice] = React.useState(''); const [preview, setPreview] = React.useState(null); const [restoreMode, setRestoreMode] = React.useState('merge');
+            const [settings, setSettings] = React.useState(() => readSettings()); const [notice, setNotice] = React.useState(''); const [preview, setPreview] = React.useState(null); const [restoreMode, setRestoreMode] = React.useState('merge'); const [consolidation, setConsolidation] = React.useState(null); const [consolidating, setConsolidating] = React.useState(false);
             const update = (key, value) => { const next = saveSettings({ ...settings, [key]: value }); setSettings(next); addActivity(user, 'UPDATE_SETTINGS', key); setNotice('Pengaturan tersimpan.'); };
             const download = () => { const payload = safeBackupData(user); const json = JSON.stringify(payload, null, 2); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([json], { type: 'application/json' })); link.download = `aksara-backup-${new Date().toISOString().slice(0,10)}.json`; link.click(); addActivity(user, 'BACKUP_EXPORT', `${Object.keys(payload.entities).length} entitas`); setNotice('Backup aman berhasil diunduh tanpa password atau kredensial.'); };
             const inspect = async event => { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; if (!file.name.toLowerCase().endsWith('.json') || file.size > 25 * 1024 * 1024) return setNotice('File harus JSON dan berukuran maksimal 25 MB.'); try { const payload = JSON.parse(await file.text()); if (payload.format !== 'AKSARA_BACKUP' || payload.schemaVersion !== 1 || !payload.entities) throw new Error('Format atau versi backup tidak didukung.'); setPreview({ payload, fileName: file.name }); } catch (e) { setNotice(`Backup tidak valid: ${e.message}`); } };
-            const restore = () => { if (!preview || !isSuperAdmin) return; const entities = preview.payload.entities; const counts = {}; Object.entries(entities).forEach(([key, incoming]) => { if (!Array.isArray(incoming) || !Array.isArray(DEMO_DB[key])) return; const current = DEMO_DB[key]; const byId = new Map(current.map(item => [item.id, item])); incoming.forEach(item => { if (item?.id) byId.set(item.id, { ...byId.get(item.id), ...item }); }); DEMO_DB[key] = [...byId.values()]; counts[key] = incoming.length; }); if (entities.settings) saveSettings({ ...readSettings(), ...entities.settings }); addActivity(user, 'BACKUP_RESTORE', `${restoreMode}; ${Object.values(counts).reduce((a,b)=>a+b,0)} record diperiksa`); setPreview(null); setNotice('Pemulihan selesai. Data digabung berdasarkan ID permanen. Password dan kredensial diabaikan.'); };
-            return <div className="space-y-6"><div><h2 className="text-2xl font-heading font-bold text-gray-900">Pengaturan</h2><p className="text-gray-500 text-sm">Kelola akun, preferensi, ujian, data, dan aktivitas sesuai hak akses.</p></div>{notice && <div role="status" className="p-3 rounded-lg border border-teal-200 bg-teal-50 text-teal-700">{notice}</div>}<div className="grid lg:grid-cols-2 gap-5">{isSuperAdmin && <PasswordChangeCard user={user} onNotice={setNotice} />}<section className="bg-white rounded-xl border p-5"><h3 className="font-bold text-lg">Profil & Akun</h3><p className="text-sm text-gray-500 mt-1">{user?.name || '-'} · {user?.role || '-'} · ID {user?.id || '-'}</p><label className="block text-sm font-medium mt-4">Bahasa<select value={settings.language || 'id-ID'} onChange={e=>update('language',e.target.value)} className="mt-1 w-full border rounded-lg p-2.5"><option value="id-ID">Bahasa Indonesia</option><option value="en-US">English</option></select></label><label className="flex items-center gap-2 mt-4 text-sm"><input type="checkbox" checked={settings.confirmRisk !== false} onChange={e=>update('confirmRisk',e.target.checked)} /> Konfirmasi sebelum tindakan berisiko</label></section><section className="bg-white rounded-xl border p-5"><h3 className="font-bold text-lg">Notifikasi & Preferensi</h3><label className="flex items-center gap-2 mt-4 text-sm"><input type="checkbox" checked={settings.announcements !== false} onChange={e=>update('announcements',e.target.checked)} /> Tampilkan pengumuman</label><label className="flex items-center gap-2 mt-3 text-sm"><input type="checkbox" checked={settings.results !== false} onChange={e=>update('results',e.target.checked)} /> Notifikasi hasil dan koreksi</label><label className="block text-sm font-medium mt-4">Baris tabel<select value={settings.pageSize || 10} onChange={e=>update('pageSize',Number(e.target.value))} className="mt-1 w-full border rounded-lg p-2.5"><option value="10">10</option><option value="25">25</option><option value="50">50</option></select></label></section><section className="bg-white rounded-xl border p-5"><h3 className="font-bold text-lg">Keamanan & Ujian</h3><p className="text-sm text-gray-500 mt-2">Sesi aktif menggunakan ID pengguna aktual. Pengelolaan password tidak tersedia di aplikasi ini.</p><label className="flex items-center gap-2 mt-4 text-sm"><input type="checkbox" checked={settings.autosave !== false} onChange={e=>update('autosave',e.target.checked)} /> Autosave jawaban ujian</label>{isSuperAdmin && <label className="flex items-center gap-2 mt-3 text-sm"><input type="checkbox" checked={settings.forceSubmitConfirm !== false} onChange={e=>update('forceSubmitConfirm',e.target.checked)} /> Konfirmasi Force Submit</label>}</section>{isSuperAdmin && <section className="bg-white rounded-xl border p-5"><h3 className="font-bold text-lg">Backup & Pemulihan Data</h3><p className="text-sm text-gray-500 mt-2">Backup terstruktur mencakup entitas aplikasi yang tersedia. Password, token, secret, API key, dan kredensial tidak pernah diekspor.</p><div className="flex flex-wrap gap-3 mt-4"><button onClick={download} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Unduh Backup</button><label className="px-4 py-2 border rounded-lg text-aksara-600 cursor-pointer">Upload Backup<input type="file" accept="application/json,.json" onChange={inspect} className="sr-only" /></label></div>{preview && <div className="mt-4 p-4 rounded-lg bg-indigo-50 border border-indigo-100"><p className="font-semibold">Pratinjau: {preview.fileName}</p><p className="text-sm text-gray-600">Dibuat: {new Date(preview.payload.createdAt).toLocaleString('id-ID')}</p><p className="text-sm text-gray-600 mt-2">{Object.entries(preview.payload.entities).map(([key,value]) => `${key}: ${Array.isArray(value) ? value.length : 'konfigurasi'}`).join(' · ')}</p><select value={restoreMode} onChange={e=>setRestoreMode(e.target.value)} className="mt-3 border rounded-lg p-2"><option value="merge">Gabungkan dengan data yang ada</option></select><div className="mt-3 flex gap-2"><button onClick={()=>setPreview(null)} className="px-3 py-2 bg-white border rounded-lg">Batal</button><button onClick={restore} className="px-3 py-2 bg-aksara-600 text-white rounded-lg">Validasi & Pulihkan</button></div></div>}</section>}</div><section className="bg-white rounded-xl border p-5"><h3 className="font-bold text-lg">Log Aktivitas</h3><div className="mt-3 divide-y">{readActivity().slice(0,20).map(log=><div key={log.id} className="py-3 text-sm"><b>{log.action}</b> · {log.actorName} · {new Date(log.createdAt).toLocaleString('id-ID')}<span className="block text-gray-500">{log.detail}</span></div>)}{!readActivity().length&&<p className="text-sm text-gray-500">Belum ada aktivitas tercatat.</p>}</div></section></div>;
+            const analyzeConsolidation = async () => { if (!isSuperAdmin || consolidating) return; setConsolidating(true); setNotice('Menganalisis data Firebase...'); try { const report = await aksaraFbConsolidate({dryRun:true}); setConsolidation(report); setNotice(report.duplicateRecords ? `Ditemukan ${report.duplicateRecords} record duplikat dalam ${report.duplicateGroups} kelompok.` : 'Tidak ditemukan duplikat yang perlu dikonsolidasikan.'); } catch(e) { setNotice(`Analisis gagal: ${e.message}`); } finally { setConsolidating(false); } }; const runConsolidation = async () => { if (!isSuperAdmin || consolidating) return; const confirmed = window.confirm('Konsolidasikan data Firebase sekarang? Duplikat akan dihapus dari Firebase setelah relasi ID diperbarui. Pastikan backup sudah tersedia.'); if (!confirmed) return; setConsolidating(true); setNotice('Mengonsolidasikan data Firebase... Jangan tutup halaman.'); try { const report = await aksaraFbConsolidate({dryRun:false}); setConsolidation(report); setNotice(`Konsolidasi selesai. ${report.removed} record duplikat dihapus dan ${report.changedReferences} relasi diperbarui.`); addActivity(user,'FIREBASE_CONSOLIDATE',`${report.removed} duplikat dihapus; ${report.changedReferences} relasi diperbarui`); } catch(e) { setNotice(`Konsolidasi gagal: ${e.message}`); } finally { setConsolidating(false); } }; const restore = () => { if (!preview || !isSuperAdmin) return; const entities = preview.payload.entities; const counts = {}; Object.entries(entities).forEach(([key, incoming]) => { if (!Array.isArray(incoming) || !Array.isArray(DEMO_DB[key])) return; const current = DEMO_DB[key]; const byId = new Map(current.map(item => [item.id, item])); incoming.forEach(item => { if (item?.id) byId.set(item.id, { ...byId.get(item.id), ...item }); }); DEMO_DB[key] = [...byId.values()]; counts[key] = incoming.length; }); if (entities.settings) saveSettings({ ...readSettings(), ...entities.settings }); addActivity(user, 'BACKUP_RESTORE', `${restoreMode}; ${Object.values(counts).reduce((a,b)=>a+b,0)} record diperiksa`); setPreview(null); setNotice('Pemulihan selesai. Data digabung berdasarkan ID permanen. Password dan kredensial diabaikan.'); };
+            return <div className="space-y-6"><div><h2 className="text-2xl font-heading font-bold text-gray-900">Pengaturan</h2><p className="text-gray-500 text-sm">Kelola akun, preferensi, ujian, data, dan aktivitas sesuai hak akses.</p></div>{notice && <div role="status" className="p-3 rounded-lg border border-teal-200 bg-teal-50 text-teal-700">{notice}</div>}<div className="grid lg:grid-cols-2 gap-5">{isSuperAdmin && <PasswordChangeCard user={user} onNotice={setNotice} />}<section className="bg-white rounded-xl border p-5"><h3 className="font-bold text-lg">Profil & Akun</h3><p className="text-sm text-gray-500 mt-1">{user?.name || '-'} · {user?.role || '-'} · ID {user?.id || '-'}</p><label className="block text-sm font-medium mt-4">Bahasa<select value={settings.language || 'id-ID'} onChange={e=>update('language',e.target.value)} className="mt-1 w-full border rounded-lg p-2.5"><option value="id-ID">Bahasa Indonesia</option><option value="en-US">English</option></select></label><label className="flex items-center gap-2 mt-4 text-sm"><input type="checkbox" checked={settings.confirmRisk !== false} onChange={e=>update('confirmRisk',e.target.checked)} /> Konfirmasi sebelum tindakan berisiko</label></section><section className="bg-white rounded-xl border p-5"><h3 className="font-bold text-lg">Notifikasi & Preferensi</h3><label className="flex items-center gap-2 mt-4 text-sm"><input type="checkbox" checked={settings.announcements !== false} onChange={e=>update('announcements',e.target.checked)} /> Tampilkan pengumuman</label><label className="flex items-center gap-2 mt-3 text-sm"><input type="checkbox" checked={settings.results !== false} onChange={e=>update('results',e.target.checked)} /> Notifikasi hasil dan koreksi</label><label className="block text-sm font-medium mt-4">Baris tabel<select value={settings.pageSize || 10} onChange={e=>update('pageSize',Number(e.target.value))} className="mt-1 w-full border rounded-lg p-2.5"><option value="10">10</option><option value="25">25</option><option value="50">50</option></select></label></section><section className="bg-white rounded-xl border p-5"><h3 className="font-bold text-lg">Keamanan & Ujian</h3><p className="text-sm text-gray-500 mt-2">Sesi aktif menggunakan ID pengguna aktual. Pengelolaan password tidak tersedia di aplikasi ini.</p><label className="flex items-center gap-2 mt-4 text-sm"><input type="checkbox" checked={settings.autosave !== false} onChange={e=>update('autosave',e.target.checked)} /> Autosave jawaban ujian</label>{isSuperAdmin && <label className="flex items-center gap-2 mt-3 text-sm"><input type="checkbox" checked={settings.forceSubmitConfirm !== false} onChange={e=>update('forceSubmitConfirm',e.target.checked)} /> Konfirmasi Force Submit</label>}</section>{isSuperAdmin && <section className="bg-white rounded-xl border p-5"><h3 className="font-bold text-lg">Backup & Pemulihan Data</h3><p className="text-sm text-gray-500 mt-2">Backup terstruktur mencakup entitas aplikasi yang tersedia. Password, token, secret, API key, dan kredensial tidak pernah diekspor.</p><div className="flex flex-wrap gap-3 mt-4"><button onClick={download} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Unduh Backup</button><label className="px-4 py-2 border rounded-lg text-aksara-600 cursor-pointer">Upload Backup<input type="file" accept="application/json,.json" onChange={inspect} className="sr-only" /></label></div>{preview && <div className="mt-4 p-4 rounded-lg bg-indigo-50 border border-indigo-100"><p className="font-semibold">Pratinjau: {preview.fileName}</p><p className="text-sm text-gray-600">Dibuat: {new Date(preview.payload.createdAt).toLocaleString('id-ID')}</p><p className="text-sm text-gray-600 mt-2">{Object.entries(preview.payload.entities).map(([key,value]) => `${key}: ${Array.isArray(value) ? value.length : 'konfigurasi'}`).join(' · ')}</p><select value={restoreMode} onChange={e=>setRestoreMode(e.target.value)} className="mt-3 border rounded-lg p-2"><option value="merge">Gabungkan dengan data yang ada</option></select><div className="mt-3 flex gap-2"><button onClick={()=>setPreview(null)} className="px-3 py-2 bg-white border rounded-lg">Batal</button><button onClick={restore} className="px-3 py-2 bg-aksara-600 text-white rounded-lg">Validasi & Pulihkan</button></div></div>}</section>}{isSuperAdmin && <section className="bg-white rounded-xl border border-amber-200 p-5"><div className="flex items-start gap-3"><div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center"><Icon name="database" className="w-5 h-5" /></div><div><h3 className="font-bold text-lg">Bersihkan & Konsolidasikan Data Firebase</h3><p className="text-sm text-gray-600 mt-1">Mendeteksi data ganda yang sudah tersimpan di Firebase. Proses konsolidasi mempertahankan satu record terbaik, memperbarui referensi ID pada data terkait, lalu menghapus record duplikat secara fisik.</p></div></div><div className="mt-4 flex flex-wrap gap-3"><button disabled={consolidating} onClick={analyzeConsolidation} className="px-4 py-2 border border-amber-500 text-amber-700 rounded-lg disabled:opacity-50">{consolidating?'Memproses...':'Analisis Duplikat'}</button>{consolidation?.duplicateRecords>0&&<button disabled={consolidating} onClick={runConsolidation} className="px-4 py-2 bg-amber-600 text-white rounded-lg disabled:opacity-50">Bersihkan & Konsolidasikan</button>}</div>{consolidation&&<div className="mt-4 p-4 rounded-lg bg-gray-50 border"><div className="grid sm:grid-cols-4 gap-3 text-sm"><div><span className="text-gray-500 block">Record diperiksa</span><b>{consolidation.scanned}</b></div><div><span className="text-gray-500 block">Kelompok duplikat</span><b>{consolidation.duplicateGroups}</b></div><div><span className="text-gray-500 block">Record duplikat</span><b>{consolidation.duplicateRecords}</b></div><div><span className="text-gray-500 block">Relasi diperbarui</span><b>{consolidation.changedReferences || 0}</b></div></div><div className="mt-3 text-xs text-gray-500">Data asli diprioritaskan berdasarkan waktu pembaruan terbaru, lalu kelengkapan data. Untuk data master seperti sekolah, NPSN digunakan sebagai identitas utama.</div></div>}</section>}</div><section className="bg-white rounded-xl border p-5"><h3 className="font-bold text-lg">Log Aktivitas</h3><div className="mt-3 divide-y">{readActivity().slice(0,20).map(log=><div key={log.id} className="py-3 text-sm"><b>{log.action}</b> · {log.actorName} · {new Date(log.createdAt).toLocaleString('id-ID')}<span className="block text-gray-500">{log.detail}</span></div>)}{!readActivity().length&&<p className="text-sm text-gray-500">Belum ada aktivitas tercatat.</p>}</div></section></div>;
         };
 
         const LANDING_SETTINGS_KEY = 'aksara_landing_settings';
