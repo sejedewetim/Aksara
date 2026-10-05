@@ -3452,7 +3452,7 @@ if ('serviceWorker' in navigator) {
             const subjectId = String(subjectRecord?.id || rawSubjectId || '').trim();
             const subjectName = String(record.subjectName || record.mapelName || record.subject || record.mapel || subjectRecord?.name || subjectRecord?.subjectName || packageRecord?.subjectName || '').trim();
             const status = String(record.status || record.publishStatus || record.publish_status || 'DRAFT').toUpperCase();
-            return { ...record, id: scheduleId, scheduleId, examId, packageId: record.packageId || examId, schoolId: String(record.schoolId || record.sekolahId || record.school_id || '').trim(), packageName, examName: packageName, name: packageName, subjectId, subjectName, subject: subjectName, mapelId: subjectId, mapelName: subjectName, date: record.date || (record.startTime ? String(record.startTime).slice(0, 10) : ''), startTime: record.startTime || '', endTime: record.endTime || '', timezone: record.timezone || 'Asia/Jakarta', room: record.room || '', status, publishStatus: String(record.publishStatus || record.publish_status || status).toUpperCase(), token: record.token || '', targetScope: String(record.targetScope || (targetClassIds.length ? 'manual' : 'all')).toLowerCase(), targetClassIds, classIds: targetClassIds, createdAt: record.createdAt || record.created_at || new Date().toISOString(), updatedAt: record.updatedAt || record.updated_at || new Date().toISOString() };
+            return { ...record, id: scheduleId, scheduleId, examId, packageId: record.packageId || examId, schoolId: String(record.schoolId || record.sekolahId || record.school_id || '').trim(), packageName, examName: packageName, name: packageName, subjectId, subjectName, subject: subjectName, mapelId: subjectId, mapelName: subjectName, date: record.date || (record.startTime ? String(record.startTime).slice(0, 10) : ''), startTime: record.startTime || '', endTime: record.endTime || '', timezone: record.timezone || 'Asia/Jakarta', room: record.room || '', status, publishStatus: String(record.publishStatus || record.publish_status || status).toUpperCase(), token: normalizeExamToken(record.token), targetScope: String(record.targetScope || (targetClassIds.length ? 'manual' : 'all')).toLowerCase(), targetClassIds, classIds: targetClassIds, createdAt: record.createdAt || record.created_at || new Date().toISOString(), updatedAt: record.updatedAt || record.updated_at || new Date().toISOString() };
         };
         const mergeLatestSchedules = (records = []) => {
             const byId = new Map();
@@ -3472,10 +3472,21 @@ if ('serviceWorker' in navigator) {
             scheduleSdkInitError = null; return true;
         };
         const readPersistentSchedules = async () => {
-            const durable = readDurableCollection('examSchedules');
-            const local = mergeLatestSchedules([...(DEMO_DB.examSchedules || []), ...durable]);
-            try { await ensureScheduleSdk(); } catch (e) {}
-            return mergeLatestSchedules([...(DEMO_DB.examSchedules || []), ...durable]);
+            // Firebase adalah sumber kebenaran untuk jadwal. Cache lokal hanya fallback saat Firebase benar-benar gagal.
+            try {
+                await aksaraFbRequireReady();
+                const snap = await AKSARA_FIREBASE.db.ref('examSchedules').once('value');
+                const remote = snap.val() && typeof snap.val() === 'object' ? snap.val() : {};
+                aksaraFbApply('examSchedules', remote);
+                const cloud = mergeLatestSchedules(aksaraFbArray(remote));
+                try { await ensureScheduleSdk(); } catch (e) {}
+                return cloud;
+            } catch (firebaseError) {
+                console.warn('[AKSARA] Firebase jadwal tidak tersedia, menggunakan cache offline:', firebaseError);
+                const durable = readDurableCollection('examSchedules');
+                try { await ensureScheduleSdk(); } catch (e) {}
+                return mergeLatestSchedules([...(DEMO_DB.examSchedules || []), ...durable]);
+            }
         };
         const persistSchedule = async record => {
             const normalized = normalizeScheduleRecord({
@@ -6958,6 +6969,13 @@ if ('serviceWorker' in navigator) {
         };
 
         const makeExamToken = () => 'AKS-' + Math.random().toString(36).slice(2,8).toUpperCase();
+        const normalizeExamToken = value => String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+        const ensureUniqueExamToken = (candidate, currentId = '') => {
+            const used = new Set((DEMO_DB.examSchedules || []).filter(s => String(s.id || s.scheduleId || '') !== String(currentId || '')).map(s => normalizeExamToken(s.token)).filter(Boolean));
+            let token = normalizeExamToken(candidate);
+            do { if (!token || used.has(token)) token = makeExamToken(); } while (used.has(token));
+            return token;
+        };
         const AdminExamSchedules = () => {
             const { user } = React.useContext(AppContext);
             const registeredSchools = getRegisteredSchools();
@@ -6979,10 +6997,10 @@ if ('serviceWorker' in navigator) {
                 window.addEventListener('aksara:firebase-changed', refresh);
                 return () => { window.removeEventListener('aksara:schedules-changed', refresh); window.removeEventListener('aksara:firebase-changed', refresh); };
             }, []);
-            const ensureToken = x => x.token || makeExamToken();
+            const ensureToken = x => normalizeExamToken(x.token) || ensureUniqueExamToken('', x.id || x.scheduleId);
             const regenerate = x => {
                 if (!window.confirm('Regenerasi Token Ujian? Token lama tidak lagi berlaku.')) return;
-                const next = { ...x, token: makeExamToken(), updatedAt: new Date().toISOString() };
+                const next = { ...x, token: ensureUniqueExamToken('', x.id || x.scheduleId), updatedAt: new Date().toISOString() };
                 const data = items.map(item => item.id === x.id ? next : item);
                 DEMO_DB.examSchedules = data; setItems([...data]); aksaraFbPersistCollection('examSchedules', data); setNotice('Token Ujian berhasil diregenerasi.');
                 window.dispatchEvent(new CustomEvent('aksara:schedules-changed'));
@@ -7048,7 +7066,7 @@ if ('serviceWorker' in navigator) {
                     targetClassIds:targetIds,
                     classIds:targetIds,
                     classId:targetIds[0] || '',
-                    token:editing.token || makeExamToken(),
+                    token:ensureUniqueExamToken(editing.token, editing.id || editing.scheduleId),
                     status:String(editing.status || 'OPEN').toUpperCase(),
                     publishStatus:String(editing.status || 'OPEN').toUpperCase(),
                     examDate:editing.examDate,
@@ -7068,15 +7086,17 @@ if ('serviceWorker' in navigator) {
                     DEMO_DB.examSchedules = mergeLatestSchedules(data);
                     persistDurableCollection('examSchedules', DEMO_DB.examSchedules);
                     setItems([...DEMO_DB.examSchedules]);
+                    // Token harus sudah benar-benar tersimpan di Firebase sebelum form ditutup.
+                    // Ini mencegah perangkat Murid/Guru membaca jadwal tanpa token karena write masih berjalan di background.
+                    await aksaraFbPersistCollection('examSchedules', DEMO_DB.examSchedules);
+                    const cloudSchedule = (DEMO_DB.examSchedules || []).find(x => String(x.id || x.scheduleId) === String(saved.id || saved.scheduleId));
+                    if (!cloudSchedule || !normalizeExamToken(cloudSchedule.token)) throw new Error('Token ujian gagal disimpan ke Firebase. Silakan coba simpan jadwal kembali.');
+                    try { await persistSchedule(saved); } catch (e) { console.warn('[AKSARA] Sinkronisasi Canva Sheet dilewati:', e); }
+                    setItems([...DEMO_DB.examSchedules]);
                     setEditing(null);
                     setSaving(false);
-                    setNotice('Jadwal ujian berhasil disimpan.');
+                    setNotice(`Jadwal ujian berhasil disimpan. Token: ${cloudSchedule.token}`);
                     window.dispatchEvent(new CustomEvent('aksara:schedules-changed'));
-                    // Sinkronisasi Firebase/Canva berjalan di belakang layar.
-                    setTimeout(() => {
-                        aksaraFbPersistCollection('examSchedules', DEMO_DB.examSchedules).catch(() => {});
-                        persistSchedule(saved).catch(() => {});
-                    }, 0);
                 } catch (err) {
                     setError(err?.message || 'Jadwal gagal disimpan.');
                     setSaving(false);
