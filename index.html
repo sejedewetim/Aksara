@@ -434,6 +434,12 @@ var DEMO_DB = {
             appId: "1:32316105558:web:baa13335a697309039acf7",
             measurementId: "G-4ZX5ES21GY"
         };
+        // Konfigurasi dikunci ke Firebase project yang digunakan AKSARA.
+        // databaseURL harus menunjuk ke instance Realtime Database regional ini.
+        if (AKSARA_FIREBASE_CONFIG.projectId !== 'aksara-bbf7b' ||
+            AKSARA_FIREBASE_CONFIG.databaseURL !== 'https://aksara-bbf7b-default-rtdb.asia-southeast1.firebasedatabase.app/') {
+            console.error('[AKSARA Firebase] Konfigurasi Firebase tidak sesuai project AKSARA.');
+        }
         // REALTIME MODE: Firebase Realtime Database menjadi sumber data bersama untuk semua perangkat.
         // Firebase Anonymous Authentication dipakai sebagai fallback agar perangkat yang login ke AKSARA
         // tetap memiliki sesi Firebase dan dapat menerima listener realtime.
@@ -500,16 +506,14 @@ var DEMO_DB = {
                 set(target,prop,val){
                     target[prop]=wrap(val);
                     if(!AKSARA_FIREBASE.applying){
-                        clearTimeout(AKSARA_FIREBASE.timer);
-                        AKSARA_FIREBASE.timer=setTimeout(()=>aksaraFbWrite(key),0);
+                        Promise.resolve().then(()=>aksaraFbWrite(key));
                     }
                     return true;
                 },
                 deleteProperty(target,prop){
                     delete target[prop];
                     if(!AKSARA_FIREBASE.applying){
-                        clearTimeout(AKSARA_FIREBASE.timer);
-                        AKSARA_FIREBASE.timer=setTimeout(()=>aksaraFbWrite(key),0);
+                        Promise.resolve().then(()=>aksaraFbWrite(key));
                     }
                     return true;
                 }
@@ -562,6 +566,28 @@ var DEMO_DB = {
                 return false;
             }
         };
+        // Tunggu koneksi Realtime Database benar-benar ONLINE.
+        // Jangan memakai .once('value') sebagai satu-satunya pemeriksaan karena
+        // nilai awal .info/connected dapat false sesaat sebelum koneksi realtime aktif.
+        const aksaraFbWaitConnected = (timeoutMs = 15000) => new Promise((resolve, reject) => {
+            if (!AKSARA_FIREBASE.db) return reject(new Error('Firebase Realtime Database belum diinisialisasi.'));
+            const ref = AKSARA_FIREBASE.db.ref('.info/connected');
+            let done = false;
+            let timer = null;
+            const finish = (ok, err) => {
+                if (done) return;
+                done = true;
+                if (timer) clearTimeout(timer);
+                ref.off('value', handler);
+                if (ok) resolve(true); else reject(err || new Error('Firebase Realtime Database belum terhubung.'));
+            };
+            const handler = snap => {
+                if (snap.val() === true) finish(true);
+            };
+            ref.on('value', handler, err => finish(false, new Error(err?.message || 'Gagal memeriksa koneksi Firebase Realtime Database.')));
+            timer = setTimeout(() => finish(false, new Error('Firebase Realtime Database tidak menjadi ONLINE dalam 15 detik. Periksa Rules, Authentication, databaseURL, dan koneksi internet.')), timeoutMs);
+        });
+
         const aksaraFbDeleteRecord = async (key, id) => {
             try {
                 await aksaraFbReady();
@@ -589,6 +615,7 @@ var DEMO_DB = {
                     aksaraFbStopListeners();
                     AKSARA_FIREBASE.started = false;
                     AKSARA_FIREBASE.uid = user.uid;
+                    await aksaraFbWaitConnected(15000);
                     const root = AKSARA_FIREBASE.db.ref();
                     const snap = await root.once('value');
                     const remote = snap.val() && typeof snap.val() === 'object' ? snap.val() : {};
@@ -682,9 +709,9 @@ var DEMO_DB = {
                     await AKSARA_FIREBASE.auth.signInAnonymously();
                 }
                 if (!AKSARA_FIREBASE.auth.currentUser) throw new Error('Firebase Authentication belum aktif.');
+                await aksaraFbWaitConnected(15000);
                 await aksaraFbStart();
-                const snap = await AKSARA_FIREBASE.db.ref('.info/connected').once('value');
-                if (snap.val() !== true) throw new Error('Firebase Realtime Database belum terhubung.');
+                await aksaraFbWaitConnected(15000);
                 return true;
             } catch (e) {
                 throw new Error(e?.message || 'Firebase belum siap.');
@@ -6732,9 +6759,8 @@ if ('serviceWorker' in navigator) {
                     await aksaraFbRequireReady();
                     const authUser = AKSARA_FIREBASE.auth?.currentUser;
                     if (!authUser) throw new Error('Firebase Authentication belum menghasilkan sesi.');
-                    const connectedSnap = await AKSARA_FIREBASE.db.ref('.info/connected').once('value');
-                    const connected = connectedSnap.val() === true;
-                    if (!connected) throw new Error('Firebase Realtime Database belum terhubung.');
+                    await aksaraFbWaitConnected(15000);
+                    const connected = true;
                     const rootSnap = await AKSARA_FIREBASE.db.ref().once('value');
                     const root = rootSnap.val() || {};
                     const count = key => { const value = root[key]; return value && typeof value === 'object' ? Object.keys(value).length : 0; };
