@@ -3109,8 +3109,9 @@ var App = function App() {
     route: route
   }), route.startsWith('orangtua/') && /*#__PURE__*/React.createElement(OrangTuaDashboard, null)) : null);
 };
-var root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(/*#__PURE__*/React.createElement(App, null));
+// Render aplikasi utama dilakukan oleh blok aplikasi terbaru di bagian akhir file.
+// Render legacy sengaja tidak dijalankan agar tidak membuat dua React root pada #root.
+
 
 // Dummy Service Worker Registration for PWA Installation Capability
 if ('serviceWorker' in navigator) {
