@@ -3401,7 +3401,7 @@ if ('serviceWorker' in navigator) {
             const subjectId = String(subjectRecord?.id || rawSubjectId || '').trim();
             const subjectName = String(record.subjectName || record.mapelName || record.subject || record.mapel || subjectRecord?.name || subjectRecord?.subjectName || packageRecord?.subjectName || '').trim();
             const status = String(record.status || record.publishStatus || record.publish_status || 'DRAFT').toUpperCase();
-            return { ...record, id: scheduleId, scheduleId, examId, packageId: record.packageId || examId, schoolId: String(record.schoolId || record.sekolahId || record.school_id || '').trim(), packageName, examName: packageName, name: packageName, subjectId, subjectName, subject: subjectName, mapelId: subjectId, mapelName: subjectName, date: record.date || (record.startTime ? String(record.startTime).slice(0, 10) : ''), startTime: record.startTime || '', endTime: record.endTime || '', timezone: record.timezone || 'Asia/Jakarta', room: record.room || '', status, publishStatus: String(record.publishStatus || record.publish_status || status).toUpperCase(), token: record.token || '', targetScope: String(record.targetScope || (targetClassIds.length ? 'manual' : 'all')).toLowerCase(), targetClassIds, classIds: targetClassIds, createdAt: record.createdAt || record.created_at || new Date().toISOString(), updatedAt: record.updatedAt || record.updated_at || new Date().toISOString() };
+            return { ...record, id: scheduleId, scheduleId, examId, packageId: record.packageId || examId, schoolId: String(record.schoolId || record.sekolahId || record.school_id || '').trim(), packageName, examName: packageName, name: packageName, subjectId, subjectName, subject: subjectName, mapelId: subjectId, mapelName: subjectName, date: record.date || (record.startTime ? String(record.startTime).slice(0, 10) : ''), startTime: record.startTime || '', endTime: record.endTime || '', timezone: record.timezone || 'Asia/Jakarta', room: record.room || '', status, publishStatus: String(record.publishStatus || record.publish_status || status).toUpperCase(), token: String(record.token || '').trim().toUpperCase() || makeExamToken(scheduleId, record.tokenVersion || 1), tokenVersion: Math.max(1, Number(record.tokenVersion) || 1), targetScope: String(record.targetScope || (targetClassIds.length ? 'manual' : 'all')).toLowerCase(), targetClassIds, classIds: targetClassIds, createdAt: record.createdAt || record.created_at || new Date().toISOString(), updatedAt: record.updatedAt || record.updated_at || new Date().toISOString() };
         };
         const mergeLatestSchedules = (records = []) => {
             const byId = new Map();
@@ -6471,7 +6471,13 @@ if ('serviceWorker' in navigator) {
             )
         };
 
-        const makeExamToken = () => 'AKS-' + Math.random().toString(36).slice(2,8).toUpperCase();
+        const makeExamToken = (scheduleId = '', version = 1) => {
+            const source = `${String(scheduleId || '').trim()}|v${Math.max(1, Number(version) || 1)}`;
+            let hash = 2166136261;
+            for (let i = 0; i < source.length; i++) { hash ^= source.charCodeAt(i); hash = Math.imul(hash, 16777619); }
+            const code = (hash >>> 0).toString(36).toUpperCase().padStart(6, '0').slice(-6);
+            return 'AKS-' + code;
+        };
         const AdminExamSchedules = () => {
             const { user } = React.useContext(AppContext);
             const registeredSchools = getRegisteredSchools();
@@ -6493,10 +6499,11 @@ if ('serviceWorker' in navigator) {
                 window.addEventListener('aksara:firebase-changed', refresh);
                 return () => { window.removeEventListener('aksara:schedules-changed', refresh); window.removeEventListener('aksara:firebase-changed', refresh); };
             }, []);
-            const ensureToken = x => x.token || makeExamToken();
+            const ensureToken = x => String(x?.token || '').trim().toUpperCase() || makeExamToken(x?.scheduleId || x?.id, x?.tokenVersion || 1);
             const regenerate = x => {
                 if (!window.confirm('Regenerasi Token Ujian? Token lama tidak lagi berlaku.')) return;
-                const next = { ...x, token: makeExamToken(), updatedAt: new Date().toISOString() };
+                const nextVersion = Math.max(1, Number(x?.tokenVersion) || 1) + 1;
+                const next = { ...x, tokenVersion: nextVersion, token: makeExamToken(x?.scheduleId || x?.id, nextVersion), updatedAt: new Date().toISOString() };
                 const data = items.map(item => item.id === x.id ? next : item);
                 DEMO_DB.examSchedules = data; setItems([...data]); aksaraFbPersistCollection('examSchedules', data); setNotice('Token Ujian berhasil diregenerasi.');
                 window.dispatchEvent(new CustomEvent('aksara:schedules-changed'));
@@ -6562,7 +6569,8 @@ if ('serviceWorker' in navigator) {
                     targetClassIds:targetIds,
                     classIds:targetIds,
                     classId:targetIds[0] || '',
-                    token:editing.token || makeExamToken(),
+                    tokenVersion:Math.max(1, Number(editing?.tokenVersion) || 1),
+                    token:String(editing?.token || '').trim().toUpperCase() || makeExamToken(editing?.id || `SCHED-${Date.now()}`, editing?.tokenVersion || 1),
                     status:String(editing.status || 'OPEN').toUpperCase(),
                     publishStatus:String(editing.status || 'OPEN').toUpperCase(),
                     examDate:editing.examDate,
@@ -7115,4 +7123,4 @@ if ('serviceWorker' in navigator) {
         }
     </script>
  
-</body></htm
+</body></html>
