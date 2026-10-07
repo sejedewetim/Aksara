@@ -474,13 +474,7 @@ var DEMO_DB = {
             arr.forEach((item,i) => {
                 if (!item || typeof item !== 'object') return;
                 const id = aksaraFbIdentity(item) || `${key}-${i}`;
-                const safeItem = aksaraFbSafe(item);
-                // TOKEN ujian adalah bagian dari data jadwal, bukan token autentikasi.
-                // Sebelumnya aksaraFbSafe sengaja membuang semua field bernama "token",
-                // sehingga token jadwal tidak pernah tersimpan ke Firebase dan perangkat murid
-                // menerima jadwal tanpa token. Pertahankan hanya token pada koleksi examSchedules.
-                if (key === 'examSchedules' && item.token) safeItem.token = String(item.token).trim().toUpperCase();
-                map[id] = safeItem;
+                map[id] = aksaraFbSafe(item);
             });
             return map;
         };
