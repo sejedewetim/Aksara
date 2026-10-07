@@ -3401,7 +3401,7 @@ if ('serviceWorker' in navigator) {
             const subjectId = String(subjectRecord?.id || rawSubjectId || '').trim();
             const subjectName = String(record.subjectName || record.mapelName || record.subject || record.mapel || subjectRecord?.name || subjectRecord?.subjectName || packageRecord?.subjectName || '').trim();
             const status = String(record.status || record.publishStatus || record.publish_status || 'DRAFT').toUpperCase();
-            return { ...record, id: scheduleId, scheduleId, examId, packageId: record.packageId || examId, schoolId: String(record.schoolId || record.sekolahId || record.school_id || '').trim(), packageName, examName: packageName, name: packageName, subjectId, subjectName, subject: subjectName, mapelId: subjectId, mapelName: subjectName, date: record.date || (record.startTime ? String(record.startTime).slice(0, 10) : ''), startTime: record.startTime || '', endTime: record.endTime || '', timezone: record.timezone || 'Asia/Jakarta', room: record.room || '', status, publishStatus: String(record.publishStatus || record.publish_status || status).toUpperCase(), token: String(record.token || '').trim().toUpperCase() || makeExamToken(scheduleId, record.tokenVersion || 1), tokenVersion: Math.max(1, Number(record.tokenVersion) || 1), targetScope: String(record.targetScope || (targetClassIds.length ? 'manual' : 'all')).toLowerCase(), targetClassIds, classIds: targetClassIds, createdAt: record.createdAt || record.created_at || new Date().toISOString(), updatedAt: record.updatedAt || record.updated_at || new Date().toISOString() };
+            return { ...record, id: scheduleId, scheduleId, examId, packageId: record.packageId || examId, schoolId: String(record.schoolId || record.sekolahId || record.school_id || '').trim(), packageName, examName: packageName, name: packageName, subjectId, subjectName, subject: subjectName, mapelId: subjectId, mapelName: subjectName, date: record.date || (record.startTime ? String(record.startTime).slice(0, 10) : ''), startTime: record.startTime || '', endTime: record.endTime || '', timezone: record.timezone || 'Asia/Jakarta', room: record.room || '', status, publishStatus: String(record.publishStatus || record.publish_status || status).toUpperCase(), token: scheduleId ? makeExamToken(scheduleId, Math.max(1, Number(record.tokenVersion) || 1)) : '', tokenVersion: Math.max(1, Number(record.tokenVersion) || 1), targetScope: String(record.targetScope || (targetClassIds.length ? 'manual' : 'all')).toLowerCase(), targetClassIds, classIds: targetClassIds, createdAt: record.createdAt || record.created_at || new Date().toISOString(), updatedAt: record.updatedAt || record.updated_at || new Date().toISOString() };
         };
         const mergeLatestSchedules = (records = []) => {
             const byId = new Map();
@@ -4979,11 +4979,32 @@ if ('serviceWorker' in navigator) {
             }, []);
         };
 
+        const dedupeTeacherRecords = (records = []) => {
+            const map = new Map();
+            const norm = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+            records.filter(Boolean).forEach(record => {
+                const r = { ...record };
+                const identity = norm(r.nip || r.nuptk || r.nik || r.username || r.email || r.teacherId || r.guruId);
+                const school = norm(r.schoolId || r.sekolahId || r.schoolName || r.sekolahName);
+                const name = norm(r.name || r.nama || r.namaGuru);
+                const key = identity ? `IDENTITY:${identity}` : `NAME:${name}|SCHOOL:${school}`;
+                const previous = map.get(key);
+                if (!previous) { map.set(key, r); return; }
+                const merged = { ...previous, ...r };
+                // Pertahankan identitas yang lebih lengkap dan jangan membuat salinan guru baru hanya karena ID berbeda.
+                ['teacherId','userId','username','password','email','nip','nuptk','schoolId','schoolName','classIds','classNames','subjectIds'].forEach(k => {
+                    if ((merged[k] == null || merged[k] === '' || (Array.isArray(merged[k]) && !merged[k].length)) && previous[k] != null) merged[k] = previous[k];
+                });
+                map.set(key, merged);
+            });
+            return [...map.values()];
+        };
+
         const AdminTeachers = () => {
             useAksaraDataRefresh();
             const [selectedSchool, setSelectedSchool] = React.useState(null);
-            const [teachers, setTeachers] = React.useState(() => mergeCollectionRecords('teachers').map(t => ({ ...t, email: t.email || DEMO_DB.users.find(u => u.id === t.userId)?.email || '', username: t.username || t.nip || t.nuptk || t.nik || '', password: t.password || t.nip || t.nuptk || t.nik || '' })));
-            React.useEffect(() => { const refreshTeachers = () => setTeachers(mergeCollectionRecords('teachers').map(t => ({ ...t, email: t.email || DEMO_DB.users.find(u => u.id === t.userId)?.email || '', username: t.username || t.nip || t.nuptk || t.nik || '', password: t.password || t.nip || t.nuptk || t.nik || '' }))); window.addEventListener('aksara:firebase-changed', refreshTeachers); window.addEventListener('aksara:schools-changed', refreshTeachers); return () => { window.removeEventListener('aksara:firebase-changed', refreshTeachers); window.removeEventListener('aksara:schools-changed', refreshTeachers); }; }, []);
+            const [teachers, setTeachers] = React.useState(() => dedupeTeacherRecords(mergeCollectionRecords('teachers')).map(t => ({ ...t, email: t.email || DEMO_DB.users.find(u => u.id === t.userId)?.email || '', username: t.username || t.nip || t.nuptk || t.nik || '', password: t.password || t.nip || t.nuptk || t.nik || '' })));
+            React.useEffect(() => { const refreshTeachers = () => setTeachers(dedupeTeacherRecords(mergeCollectionRecords('teachers')).map(t => ({ ...t, email: t.email || DEMO_DB.users.find(u => u.id === t.userId)?.email || '', username: t.username || t.nip || t.nuptk || t.nik || '', password: t.password || t.nip || t.nuptk || t.nik || '' }))); window.addEventListener('aksara:firebase-changed', refreshTeachers); window.addEventListener('aksara:schools-changed', refreshTeachers); return () => { window.removeEventListener('aksara:firebase-changed', refreshTeachers); window.removeEventListener('aksara:schools-changed', refreshTeachers); }; }, []);
             const [search, setSearch] = React.useState('');
             const [status, setStatus] = React.useState('');
             const [school, setSchool] = React.useState('');
@@ -6600,7 +6621,7 @@ if ('serviceWorker' in navigator) {
                 window.addEventListener('aksara:firebase-changed', refresh);
                 return () => { window.removeEventListener('aksara:schedules-changed', refresh); window.removeEventListener('aksara:firebase-changed', refresh); };
             }, []);
-            const ensureToken = x => String(x?.token || '').trim().toUpperCase() || makeExamToken(x?.scheduleId || x?.id, x?.tokenVersion || 1);
+            const ensureToken = x => makeExamToken(x?.scheduleId || x?.id, Math.max(1, Number(x?.tokenVersion) || 1));
             const regenerate = x => {
                 if (!window.confirm('Regenerasi Token Ujian? Token lama tidak lagi berlaku.')) return;
                 const nextVersion = Math.max(1, Number(x?.tokenVersion) || 1) + 1;
@@ -6611,8 +6632,10 @@ if ('serviceWorker' in navigator) {
             };
             const copyToken = async x => {
                 const token = ensureToken(x);
-                if (!x.token) { const data = items.map(item => item.id === x.id ? { ...item, token } : item); DEMO_DB.examSchedules = data; setItems([...data]); aksaraFbPersistCollection('examSchedules', data); }
-                try { await navigator.clipboard.writeText(token); setNotice('Token Ujian disalin.'); } catch (e) { setNotice('Token tersedia, tetapi gagal disalin otomatis.'); }
+                const data = items.map(item => String(item.id || item.scheduleId) === String(x.id || x.scheduleId) ? { ...item, token, tokenVersion: Math.max(1, Number(item.tokenVersion) || 1), updatedAt: new Date().toISOString() } : item);
+                DEMO_DB.examSchedules = data; setItems([...data]); aksaraFbPersistCollection('examSchedules', data);
+                window.dispatchEvent(new CustomEvent('aksara:schedules-changed'));
+                try { await navigator.clipboard.writeText(token); setNotice('Token Ujian disalin. Token yang sama digunakan pada semua perangkat.'); } catch (e) { setNotice('Token tersedia, tetapi gagal disalin otomatis.'); }
             };
             const open = (item = null) => {
                 const x = item || { packageId:'', examDate:'', duration:60, status:'OPEN', schoolId:defaultSchoolId, targetScope:'all', targetClassIds:[], attemptMode:'ONCE', maxAttempts:1 };
@@ -6653,10 +6676,11 @@ if ('serviceWorker' in navigator) {
                 const retry = editing.attemptMode === 'RETRY';
                 const targetIds = targetScope === 'all' ? classesForSchool.map(c => String(c.id)) : selectedClassIds;
                 const now = new Date().toISOString();
+                const scheduleKey = String(editing?.scheduleId || editing?.id || `SCHED-${Date.now()}`).trim();
                 const next = {
                     ...editing,
-                    id:editing.id || `SCHED-${Date.now()}`,
-                    scheduleId:editing.scheduleId || editing.id || `SCHED-${Date.now()}`,
+                    id:scheduleKey,
+                    scheduleId:scheduleKey,
                     examId:packageId,
                     packageId,
                     packageName:selectedPackage?.name || editing.name || 'Jadwal Ujian',
@@ -6671,7 +6695,7 @@ if ('serviceWorker' in navigator) {
                     classIds:targetIds,
                     classId:targetIds[0] || '',
                     tokenVersion:Math.max(1, Number(editing?.tokenVersion) || 1),
-                    token:String(editing?.token || '').trim().toUpperCase() || makeExamToken(editing?.id || `SCHED-${Date.now()}`, editing?.tokenVersion || 1),
+                    token:makeExamToken(scheduleKey, Math.max(1, Number(editing?.tokenVersion) || 1)),
                     status:String(editing.status || 'OPEN').toUpperCase(),
                     publishStatus:String(editing.status || 'OPEN').toUpperCase(),
                     examDate:editing.examDate,
@@ -6974,7 +6998,8 @@ if ('serviceWorker' in navigator) {
                         ...schedule,
                         id: schedule.id || schedule.scheduleId,
                         packageName: String(schedule.packageName || schedule.examName || schedule.name || '').trim() || 'Paket Ujian',
-                        token: schedule.token || ''
+                        token: makeExamToken(schedule.scheduleId || schedule.id, Math.max(1, Number(schedule.tokenVersion) || 1)),
+                        tokenVersion: Math.max(1, Number(schedule.tokenVersion) || 1)
                     }));
 
                     setSchedules(rows);
