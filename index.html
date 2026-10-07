@@ -4228,7 +4228,45 @@ if ('serviceWorker' in navigator) {
         const aksaraOriginalLogin = mockApiService.login;
         // Login lokal harus selalu selesai. Jangan pernah menggantung karena error
         // pada hidrasi profil Guru/Murid atau karena Firebase sedang lambat.
+        // Resolver akun terpadu: akun aktif boleh berasal dari users, teachers, students, atau parents.
+        // Ini menjaga akun lama tetap dapat digunakan tanpa harus dibuat ulang.
+        const aksaraResolveStoredAccount = (identifier, password) => {
+            const id = String(identifier ?? '').trim().toLowerCase();
+            const pw = String(password ?? '');
+            const users = mergeCollectionRecords('users');
+            const teachers = mergeCollectionRecords('teachers');
+            const students = mergeCollectionRecords('students');
+            const parents = mergeCollectionRecords('parents');
+            const candidates = [];
+            users.forEach(r => candidates.push({ source:'users', record:r, role:String(r?.role || '').toUpperCase() }));
+            teachers.forEach(r => candidates.push({ source:'teachers', record:r, role:'GURU' }));
+            students.forEach(r => candidates.push({ source:'students', record:r, role:'MURID' }));
+            parents.forEach(r => candidates.push({ source:'parents', record:r, role:'ORANG_TUA' }));
+            const match = candidates.find(({record}) => {
+                const username = String(record?.username || record?.userName || record?.email || record?.login || record?.nip || record?.nuptk || record?.nisn || '').trim().toLowerCase();
+                const stored = String(record?.password ?? record?.kataSandi ?? record?.kata_sandi ?? '');
+                return username === id && stored === pw && String(record?.status ?? 'ACTIVE').trim().toUpperCase() === 'ACTIVE';
+            });
+            if (!match) return null;
+            const r = match.record;
+            let role = match.role || String(r?.role || '').toUpperCase();
+            if (!role) role = r?.teacherId || r?.nip || r?.nuptk ? 'GURU' : r?.studentId || r?.nisn ? 'MURID' : r?.parentId || r?.studentNisn ? 'ORANG_TUA' : 'GURU';
+            const idValue = r?.id || r?.userId || r?.teacherId || r?.studentId || r?.parentId || r?.nisn || r?.username;
+            const linked = role === 'GURU' ? (teachers.find(t => String(t.id)===String(r.id) || String(t.userId)===String(r.userId) || String(t.teacherId)===String(r.teacherId)) || r)
+                : role === 'MURID' ? (students.find(st => String(st.id)===String(r.id) || String(st.userId)===String(r.userId) || String(st.studentId)===String(r.studentId) || String(st.nisn)===String(r.nisn)) || r)
+                : role === 'ORANG_TUA' ? (parents.find(pa => String(pa.id)===String(r.id) || String(pa.userId)===String(r.userId) || String(pa.parentId)===String(r.parentId) || String(pa.username).toLowerCase()===id) || r) : r;
+            const merged = { ...linked, ...r, id:idValue, userId:r.userId || (role==='GURU'?r.teacherId:role==='MURID'?r.studentId:role==='ORANG_TUA'?r.parentId:undefined), role, status:'ACTIVE' };
+            return { ...merged, password: undefined };
+        };
+
         mockApiService.login = async (identifier, password) => {
+            // Utamakan resolver data akun yang sudah tersimpan. Firebase Auth tidak menjadi
+            // prasyarat karena kredensial lama pada master data harus tetap dapat digunakan.
+            const resolved = aksaraResolveStoredAccount(identifier, password);
+            if (resolved) {
+                const token = btoa(JSON.stringify({ userId: resolved.id, role: resolved.role, timestamp: Date.now() }));
+                return { success:true, data:{ token, user:resolved }, message:'Login berhasil' };
+            }
             let result;
             try {
                 result = await Promise.race([
@@ -4236,30 +4274,10 @@ if ('serviceWorker' in navigator) {
                     new Promise((_, reject) => setTimeout(() => reject({ code: 'AUTH_TIMEOUT', message: 'Proses login terlalu lama. Silakan coba lagi.' }), 4000))
                 ]);
             } catch (error) {
-                // Jika hydrasi profil Guru menyebabkan error, ulangi validasi akun
-                // secara sederhana agar login tetap dapat masuk ke dashboard.
                 if (error?.code === 'AUTH_TIMEOUT') throw error;
-                try {
-                    const id = String(identifier ?? '').trim().toLowerCase();
-                    const pw = String(password ?? '');
-                    const records = [
-                        ...mergeCollectionRecords('users'),
-                        ...mergeCollectionRecords('teachers'),
-                        ...mergeCollectionRecords('students'),
-                        ...mergeCollectionRecords('parents')
-                    ];
-                    const found = records.find(r => {
-                        const username = String(r?.username || r?.userName || r?.email || r?.login || '').trim().toLowerCase();
-                        const stored = String(r?.password || r?.kataSandi || r?.kata_sandi || '');
-                        return username === id && stored === pw && String(r?.status || 'ACTIVE').toUpperCase() === 'ACTIVE';
-                    });
-                    if (!found) throw error;
-                    const role = normalizeAdminRole(found) || String(found.role || 'GURU').toUpperCase();
-                    const fallbackUser = { ...found, id: found.id || found.userId || found.teacherId || found.studentId, role, password: undefined };
-                    result = { success: true, data: { token: btoa(JSON.stringify({ userId: fallbackUser.id, role, timestamp: Date.now() })), user: fallbackUser }, message: 'Login berhasil' };
-                } catch (_) {
-                    throw error;
-                }
+                const fallback = aksaraResolveStoredAccount(identifier, password);
+                if (!fallback) throw error;
+                result = { success:true, data:{ token:btoa(JSON.stringify({ userId:fallback.id, role:fallback.role, timestamp:Date.now() })), user:fallback }, message:'Login berhasil' };
             }
             if (result && result.success && result.data && result.data.user) {
                 // Firebase benar-benar background-only dan tidak boleh memblokir login.
