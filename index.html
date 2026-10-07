@@ -3512,12 +3512,17 @@ if ('serviceWorker' in navigator) {
                     (email && tEmail === email);
             });
             if (!found) return null;
+            const resolvedSchoolId = String(found.schoolId || found.sekolahId || user?.schoolId || user?.sekolahId || '').trim();
+            const resolvedSchoolName = getSchoolName(resolvedSchoolId, found.schoolName || found.sekolahName || user?.schoolName || user?.sekolahName || '');
             return normalizeTeacherRecord({ ...found,
                 teacherId: found.teacherId || found.guruId || found.id,
                 userId: found.userId || user?.userId || user?.id || '',
-                schoolId: String(found.schoolId || found.sekolahId || user?.schoolId || user?.sekolahId || '').trim(),
-                schoolName: found.schoolName || found.sekolahName || user?.schoolName || user?.sekolahName || getSchoolName(found.schoolId || found.sekolahId || user?.schoolId || user?.sekolahId || ''),
+                schoolId: resolvedSchoolId,
+                sekolahId: resolvedSchoolId,
+                schoolName: resolvedSchoolName,
+                sekolahName: resolvedSchoolName,
                 classIds: found.classIds || found.kelasIds || [],
+                classNames: found.classNames || found.kelas || [],
                 subjectIds: found.subjectIds || found.mataPelajaranIds || []
             });
         };
@@ -4805,9 +4810,16 @@ if ('serviceWorker' in navigator) {
             return out;
         };
         const getRegisteredSchools = () => mergeCollectionRecords('schools').filter(s => s && s.id && (s.name || s.schoolName));
-        const getSchoolName = (schoolId) => {
-            const found = getRegisteredSchools().find(s => String(s.id) === String(schoolId));
-            return found?.name || found?.schoolName || '';
+        const getSchoolName = (schoolId, fallbackName = '') => {
+            const ref = String(schoolId ?? '').trim();
+            const fallback = String(fallbackName ?? '').trim();
+            const schools = getRegisteredSchools();
+            const norm = v => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+            const found = schools.find(s => {
+                const ids = [s.id, s.schoolId, s.sekolahId, s.kodeSekolah, s.npsn].map(v => String(v ?? '').trim()).filter(Boolean);
+                return ref && ids.some(v => v === ref);
+            }) || (fallback ? schools.find(s => norm(s.name || s.schoolName || s.namaSekolah) === norm(fallback)) : null);
+            return found?.name || found?.schoolName || found?.namaSekolah || fallback || '';
         };
         const readDurableCollection = (key) => {
             const sources = [
@@ -5050,7 +5062,62 @@ if ('serviceWorker' in navigator) {
             }, [DEMO_DB.schools.length, selectedSchool]);
             const openStudentModal = (student = null) => { setEditingId(student?.id || null); setForm(student ? { name: student.name || '', nisn: student.nisn || '', parentName: student.parentName || DEMO_DB.parents.find(p => p.studentId === student.id)?.name || '', status: student.status || 'ACTIVE', username: student.username || student.nisn || '', password: student.password || student.nisn || '', schoolId: student.schoolId || selectedSchool || '', classId: normalizeStudentClassValue(student.classId || student.kelasId || ''), gender: normalizeStudentGender(student.gender || student.jenisKelamin || student.jk) } : { name: '', nisn: '', parentName: '', status: 'ACTIVE', username: '', password: '', schoolId: selectedSchool || '', classId: '', gender: '' }); setError(''); setShowPassword(false); setModal('student'); };
             const closeModal = () => { setModal(null); setError(''); setEditingId(null); };
-            const saveStudent = async (e) => { e.preventDefault(); const name = form.name.trim(), nisn = String(form.nisn ?? '').trim(), parentName = form.parentName.trim(), schoolId = String(form.schoolId ?? '').trim(); if (!name || !nisn) return setError('Nama Lengkap dan NISN wajib diisi.'); if (!schoolId) return setError('Sekolah wajib dipilih.'); const className = studentClassLabel(form.classId); const classId = normalizeStudentClassValue(form.classId); if (!classId) return setError('Kelas wajib dipilih.'); const gender = normalizeStudentGender(form.gender); if (!gender) return setError('Jenis kelamin wajib dipilih.'); if (!/^[^<>]*$/.test(nisn)) return setError('NISN berisi karakter yang tidak valid.'); if (students.some(s => s.id !== editingId && s.schoolId === schoolId && String(s.nisn ?? '').trim() === nisn)) return setError('NISN sudah digunakan di sekolah ini.'); const next = { ...(students.find(s => s.id === editingId) || {}), id: editingId || `STD-${Date.now()}`, name, nisn, schoolId, schoolName: getSchoolName(schoolId), classId, className, gender, jenisKelamin: gender, status: form.status, parentName, username: form.username.trim() || nisn, password: form.password || nisn }; const updated = editingId ? students.map(s => s.id === editingId ? next : s) : [...students, next]; setStudents(updated); DEMO_DB.students = updated; persistDurableCollection('students', updated); try { await aksaraFbPersistCollection('students', updated); } catch (e) { console.warn('[AKSARA] sinkron students admin', e); } const studentUser = { id: next.userId || `USR-STU-${next.id}`, userId: next.userId || `USR-STU-${next.id}`, studentId: next.id, username: next.username, password: next.password, name: next.name, schoolId: next.schoolId, schoolName: next.schoolName, classId: next.classId, className: next.className, role: 'MURID', status: next.status || 'ACTIVE' }; const existingUsers = mergeCollectionRecords('users').filter(u => String(u.id || u.userId || u.studentId || '') !== String(studentUser.id) && String(u.studentId || '') !== String(next.id)); DEMO_DB.users = [...existingUsers, studentUser]; persistDurableCollection('users', DEMO_DB.users); let parent = DEMO_DB.parents.find(p => p.studentId === next.id); if (parentName) { const parentNext = { ...(parent || {}), id: parent?.id || `PAR-${Date.now()}`, studentId: next.id, studentNisn: next.nisn, name: parentName, status: form.status, username: parent?.username || `OT-${next.nisn}`, password: parent?.password || `OT-${next.nisn}`, relationship: parent?.relationship || 'WALI' }; DEMO_DB.parents = parent ? DEMO_DB.parents.map(p => p.id === parent.id ? parentNext : p) : [...DEMO_DB.parents, parentNext]; persistDurableCollection('parents', DEMO_DB.parents); try { await aksaraFbPersistCollection('parents', DEMO_DB.parents); } catch (e) { console.warn('[AKSARA] sinkron parents admin', e); } } try { await aksaraFbPersistCollection('users', DEMO_DB.users); } catch (e) { console.warn('[AKSARA] sinkron users admin', e); } window.dispatchEvent(new Event('aksara:students-changed')); closeModal(); setNotice(editingId ? 'Data murid berhasil diperbarui.' : 'Murid berhasil ditambahkan.'); setTimeout(() => setNotice(''), 3000); };
+            const saveStudent = async (e) => {
+                e.preventDefault();
+                const name = form.name.trim(), nisn = String(form.nisn ?? '').trim(), parentName = form.parentName.trim(), schoolId = String(form.schoolId ?? '').trim();
+                if (!name || !nisn) return setError('Nama Lengkap dan NISN wajib diisi.');
+                if (!schoolId) return setError('Sekolah wajib dipilih.');
+                const className = studentClassLabel(form.classId);
+                const classId = normalizeStudentClassValue(form.classId);
+                if (!classId) return setError('Kelas wajib dipilih.');
+                const gender = normalizeStudentGender(form.gender);
+                if (!gender) return setError('Jenis kelamin wajib dipilih.');
+                if (!/^[^<>]*$/.test(nisn)) return setError('NISN berisi karakter yang tidak valid.');
+                const normNisn = nisn.toLowerCase();
+                const existingById = students.find(s => String(s.id) === String(editingId) || String(s.studentId || '') === String(editingId));
+                const existingByNisn = students.find(s => String(s.nisn ?? s.nis ?? '').trim().toLowerCase() === normNisn);
+                if (!editingId && existingByNisn) return setError('NISN sudah terdaftar. Gunakan menu Edit pada murid tersebut agar tidak membuat akun ganda.');
+                const canonical = existingById || existingByNisn || {};
+                const canonicalId = String(canonical.studentId || canonical.id || editingId || `STD-${Date.now()}-${Math.random().toString(36).slice(2,7)}`).trim();
+                const next = { ...canonical, ...form, id: canonicalId, studentId: canonical.studentId || canonicalId, userId: canonical.userId || `USR-STU-${canonicalId}`, name, nisn, schoolId, sekolahId: schoolId, schoolName: getSchoolName(schoolId), classId, className, gender, jenisKelamin: gender, status: form.status || 'ACTIVE', parentName, username: form.username.trim() || canonical.username || nisn, password: form.password || canonical.password || nisn, updatedAt: new Date().toISOString() };
+                // Konsolidasikan semua record dengan NISN yang sama menjadi satu murid.
+                const studentMap = new Map();
+                [...students, next].forEach(s => {
+                    const key = String(s.nisn ?? s.nis ?? s.studentId ?? s.id ?? '').trim().toLowerCase();
+                    if (!key) return;
+                    const old = studentMap.get(key);
+                    studentMap.set(key, old ? { ...old, ...s, id: next.nisn.toLowerCase() === key ? canonicalId : (old.id || s.id), studentId: next.nisn.toLowerCase() === key ? (next.studentId || canonicalId) : (old.studentId || s.studentId) } : { ...s });
+                });
+                const updated = [...studentMap.values()].map(s => String(s.nisn ?? s.nis ?? '').trim().toLowerCase() === normNisn ? next : s);
+                setStudents(updated);
+                DEMO_DB.students = updated;
+                persistDurableCollection('students', updated);
+                try { await aksaraFbPersistCollection('students', updated); } catch (e) { console.warn('[AKSARA] sinkron students admin', e); }
+                // Satu murid = satu akun. Cari akun lama berdasarkan studentId, NISN, atau username sebelum membuat/mengganti.
+                const oldUser = mergeCollectionRecords('users').find(u => String(u.studentId || '') === String(next.studentId) || String(u.nisn || u.nis || '').trim() === nisn || String(u.username || '').trim().toLowerCase() === String(next.username || '').trim().toLowerCase());
+                const studentUser = { ...(oldUser || {}), id: oldUser?.id || next.userId || `USR-STU-${next.studentId}`, userId: oldUser?.userId || next.userId || oldUser?.id || `USR-STU-${next.studentId}`, studentId: next.studentId, nisn: next.nisn, username: next.username, password: next.password, name: next.name, schoolId: next.schoolId, schoolName: next.schoolName, classId: next.classId, className: next.className, gender: next.gender, jenisKelamin: next.jenisKelamin, role: 'MURID', status: next.status || 'ACTIVE' };
+                const userMap = new Map();
+                mergeCollectionRecords('users').filter(u => String(u.role || '').toUpperCase() !== 'MURID' || !String(u.studentId || '').trim()).forEach(u => userMap.set(String(u.id || u.userId || u.username || Math.random()), u));
+                mergeCollectionRecords('users').filter(u => String(u.role || '').toUpperCase() === 'MURID').forEach(u => {
+                    const same = String(u.studentId || '') === String(next.studentId) || String(u.nisn || u.nis || '').trim() === nisn || String(u.username || '').trim().toLowerCase() === String(next.username || '').trim().toLowerCase();
+                    if (!same) userMap.set(String(u.id || u.userId || u.username || Math.random()), u);
+                });
+                userMap.set(String(studentUser.id), studentUser);
+                DEMO_DB.users = [...userMap.values()];
+                persistDurableCollection('users', DEMO_DB.users);
+                let parent = DEMO_DB.parents.find(p => String(p.studentId || '') === String(next.studentId) || String(p.studentNisn || '').trim() === nisn);
+                if (parentName) {
+                    const parentNext = { ...(parent || {}), id: parent?.id || `PAR-${Date.now()}`, studentId: next.studentId, studentNisn: next.nisn, name: parentName, status: form.status, username: parent?.username || `OT-${next.nisn}`, password: parent?.password || `OT-${next.nisn}`, relationship: parent?.relationship || 'WALI' };
+                    DEMO_DB.parents = parent ? DEMO_DB.parents.map(p => p.id === parent.id ? parentNext : p) : [...DEMO_DB.parents, parentNext];
+                    persistDurableCollection('parents', DEMO_DB.parents);
+                    try { await aksaraFbPersistCollection('parents', DEMO_DB.parents); } catch (e) { console.warn('[AKSARA] sinkron parents admin', e); }
+                }
+                try { await aksaraFbPersistCollection('users', DEMO_DB.users); } catch (e) { console.warn('[AKSARA] sinkron users admin', e); }
+                window.dispatchEvent(new Event('aksara:students-changed'));
+                closeModal();
+                setNotice(editingId ? 'Data murid berhasil diperbarui tanpa membuat akun ganda.' : 'Murid berhasil ditambahkan.');
+                setTimeout(() => setNotice(''), 3000);
+            };
             const filteredStudents = students.filter(s => !selectedSchool || String(s.schoolId || s.sekolahId || '') === String(selectedSchool)).filter(s => {
                 const cls = DEMO_DB.classes.find(c => c.id === s.classId);
                 const query = search.trim().toLowerCase();
