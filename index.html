@@ -5151,18 +5151,28 @@ if ('serviceWorker' in navigator) {
                                                                 const xNisn = String(x.nisn || x.nis || x.studentNisn || '').trim();
                                                                 return xIds.some(id => ids.includes(id)) || (!!nisn && xNisn === nisn);
                                                             };
-                                                            const updatedStudents = (DEMO_DB.students || []).filter(x => !sameStudent(x));
-                                                            const removedUsers = (DEMO_DB.users || []).filter(u => String(u.role || '').toUpperCase() === 'MURID' && sameStudent(u));
+                                                            const currentStudents = DEMO_DB.students || [];
+                                                            const currentUsers = DEMO_DB.users || [];
+                                                            const currentParents = DEMO_DB.parents || [];
+                                                            const currentParentLinks = DEMO_DB.parent_student || [];
+                                                            const removedStudents = currentStudents.filter(x => sameStudent(x));
+                                                            const updatedStudents = currentStudents.filter(x => !sameStudent(x));
+                                                            const removedUsers = currentUsers.filter(u => String(u.role || '').toUpperCase() === 'MURID' && sameStudent(u));
                                                             const removedUserIds = new Set(removedUsers.flatMap(u => [u.id, u.userId].filter(Boolean).map(String)));
-                                                            const updatedUsers = (DEMO_DB.users || []).filter(u => !(String(u.role || '').toUpperCase() === 'MURID' && sameStudent(u)));
-                                                            const updatedParents = (DEMO_DB.parents || []).filter(p => !sameStudent(p) && String(p.studentId || '') !== String(s.id) && String(p.studentId || '') !== String(s.studentId) && String(p.studentNisn || '').trim() !== String(s.nisn || s.nis || '').trim());
-                                                            const updatedParentLinks = (DEMO_DB.parent_student || []).filter(link => String(link.studentId || '') !== String(s.id) && String(link.studentId || '') !== String(s.studentId) && !removedUserIds.has(String(link.studentId || '')));
-                                                            // Firebase ditulis lebih dahulu; UI/cache baru diperbarui setelah semua operasi utama berhasil.
+                                                            const updatedUsers = currentUsers.filter(u => !(String(u.role || '').toUpperCase() === 'MURID' && sameStudent(u)));
+                                                            const removedParents = currentParents.filter(p => sameStudent(p) || String(p.studentId || '') === String(s.id) || String(p.studentId || '') === String(s.studentId) || (!!String(s.nisn || s.nis || '').trim() && String(p.studentNisn || '').trim() === String(s.nisn || s.nis || '').trim()));
+                                                            const updatedParents = currentParents.filter(p => !removedParents.includes(p));
+                                                            const removedParentLinks = currentParentLinks.filter(link => String(link.studentId || '') === String(s.id) || String(link.studentId || '') === String(s.studentId) || removedUserIds.has(String(link.studentId || '')));
+                                                            const updatedParentLinks = currentParentLinks.filter(link => !removedParentLinks.includes(link));
+                                                            // Hapus hanya child record yang terkait. Jangan set ulang seluruh koleksi karena dapat ditolak Firebase Rules.
                                                             const db = AKSARA_FIREBASE.db;
-                                                            await db.ref('students').set(aksaraFbMap('students', updatedStudents));
-                                                            await db.ref('users').set(aksaraFbMap('users', updatedUsers));
-                                                            await db.ref('parents').set(aksaraFbMap('parents', updatedParents));
-                                                            await db.ref('parent_student').set(aksaraFbMap('parent_student', updatedParentLinks));
+                                                            const firebaseKey = (key, item, index) => String(item.id || item.userId || item.studentId || item.teacherId || item.parentId || item.scheduleId || item.attemptId || item.questionId || `${key}-${index}`);
+                                                            const removals = [];
+                                                            removedStudents.forEach(item => { const i = currentStudents.indexOf(item); removals.push(db.ref(`students/${firebaseKey('students', item, i)}`).remove()); });
+                                                            removedUsers.forEach(item => { const i = currentUsers.indexOf(item); removals.push(db.ref(`users/${firebaseKey('users', item, i)}`).remove()); });
+                                                            removedParents.forEach(item => { const i = currentParents.indexOf(item); removals.push(db.ref(`parents/${firebaseKey('parents', item, i)}`).remove()); });
+                                                            removedParentLinks.forEach(item => { const i = currentParentLinks.indexOf(item); removals.push(db.ref(`parent_student/${firebaseKey('parent_student', item, i)}`).remove()); });
+                                                            await Promise.all(removals);
                                                             DEMO_DB.students = updatedStudents; DEMO_DB.users = updatedUsers; DEMO_DB.parents = updatedParents; DEMO_DB.parent_student = updatedParentLinks;
                                                             ['students','users','parents','parent_student'].forEach(key => persistDurableCollection(key, DEMO_DB[key]));
                                                             setStudents(updatedStudents);
@@ -5172,7 +5182,7 @@ if ('serviceWorker' in navigator) {
                                                             setNotice('Data murid dan akun terkait berhasil dihapus dari Firebase.');
                                                         } catch (err) {
                                                             console.error('[AKSARA] Gagal menghapus murid dari Firebase:', err);
-                                                            setNotice('Gagal menghapus data dari Firebase. Data tidak dinyatakan terhapus; periksa koneksi dan izin Firebase lalu coba lagi.');
+                                                            setNotice('Gagal menghapus data dari Firebase: ' + (err && err.message ? err.message : 'kesalahan tidak diketahui') + '. Data belum dipastikan terhapus; periksa izin Firebase lalu coba lagi.');
                                                         }
                                                         setTimeout(() => setNotice(''), 4500);
                                                     }} className="px-2 py-1 text-xs text-red-600 border rounded">Hapus</button>
