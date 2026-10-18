@@ -530,17 +530,10 @@ var DEMO_DB = {
                             return;
                         }
                         const remoteRows = remote[key] && typeof remote[key] === 'object' ? aksaraFbArray(remote[key]) : [];
-                        const localRows = Array.isArray(DEMO_DB[key]) ? DEMO_DB[key] : [];
-                        const merged=[]; const seen=new Set();
-                        [...remoteRows,...localRows].forEach(item=>{
-                            if(!item || typeof item!=='object') return;
-                            const id=String(item.id||item.userId||item.studentId||item.teacherId||item.parentId||item.scheduleId||item.questionId||item.attemptId||item.nisn||item.username||JSON.stringify(item)).trim();
-                            if(seen.has(id)) return; seen.add(id); merged.push(item);
-                        });
-                        if(remote[key] == null || (remoteRows.length===0 && localRows.length>0) || merged.length>remoteRows.length) {
-                            missingUpdates[key]=aksaraFbMap(key,merged);
-                            DEMO_DB[key]=merged;
-                        }
+                        // Firebase menjadi satu-satunya sumber kebenaran setelah root berisi data.
+                        // Key yang tidak ada dianggap koleksi kosong; jangan pulihkan dari cache lokal
+                        // karena cache perangkat lain dapat berisi record yang sudah dihapus.
+                        DEMO_DB[key] = remoteRows;
                     });
                     if(Object.keys(missingUpdates).length) await root.update(missingUpdates);
                 }
@@ -5146,7 +5139,43 @@ if ('serviceWorker' in navigator) {
                                                 <td className="px-6 py-4 text-gray-700">{s.gender}</td>
                                                 <td className="px-6 py-4"><Badge status={s.status} /></td>
                                                 <td className="px-6 py-4 text-right">
-                                                    <button onClick={() => openStudentModal(s)} className="px-2 py-1 text-xs text-aksara-600 border rounded">Edit</button><button onClick={() => { if (window.confirm('Hapus murid dan data wali terkait?')) { const updated = students.filter(x => x.id !== s.id); setStudents(updated); DEMO_DB.students = updated; DEMO_DB.parents = DEMO_DB.parents.filter(p => p.studentId !== s.id); setNotice('Murid berhasil dihapus.'); } }} className="px-2 py-1 text-xs text-red-600 border rounded">Hapus</button>
+                                                    <button onClick={() => openStudentModal(s)} className="px-2 py-1 text-xs text-aksara-600 border rounded">Edit</button><button onClick={async () => {
+                                                        if (!window.confirm('Hapus murid, akun login, dan data wali terkait secara permanen?')) return;
+                                                        setNotice('Menghapus data murid dari Firebase...');
+                                                        try {
+                                                            await aksaraFbReady();
+                                                            const sameStudent = (x) => {
+                                                                const ids = [s.id, s.studentId, s.userId].filter(Boolean).map(String);
+                                                                const xIds = [x.id, x.studentId, x.userId].filter(Boolean).map(String);
+                                                                const nisn = String(s.nisn || s.nis || '').trim();
+                                                                const xNisn = String(x.nisn || x.nis || x.studentNisn || '').trim();
+                                                                return xIds.some(id => ids.includes(id)) || (!!nisn && xNisn === nisn);
+                                                            };
+                                                            const updatedStudents = (DEMO_DB.students || []).filter(x => !sameStudent(x));
+                                                            const removedUsers = (DEMO_DB.users || []).filter(u => String(u.role || '').toUpperCase() === 'MURID' && sameStudent(u));
+                                                            const removedUserIds = new Set(removedUsers.flatMap(u => [u.id, u.userId].filter(Boolean).map(String)));
+                                                            const updatedUsers = (DEMO_DB.users || []).filter(u => !(String(u.role || '').toUpperCase() === 'MURID' && sameStudent(u)));
+                                                            const updatedParents = (DEMO_DB.parents || []).filter(p => !sameStudent(p) && String(p.studentId || '') !== String(s.id) && String(p.studentId || '') !== String(s.studentId) && String(p.studentNisn || '').trim() !== String(s.nisn || s.nis || '').trim());
+                                                            const updatedParentLinks = (DEMO_DB.parent_student || []).filter(link => String(link.studentId || '') !== String(s.id) && String(link.studentId || '') !== String(s.studentId) && !removedUserIds.has(String(link.studentId || '')));
+                                                            // Firebase ditulis lebih dahulu; UI/cache baru diperbarui setelah semua operasi utama berhasil.
+                                                            const db = AKSARA_FIREBASE.db;
+                                                            await db.ref('students').set(aksaraFbMap('students', updatedStudents));
+                                                            await db.ref('users').set(aksaraFbMap('users', updatedUsers));
+                                                            await db.ref('parents').set(aksaraFbMap('parents', updatedParents));
+                                                            await db.ref('parent_student').set(aksaraFbMap('parent_student', updatedParentLinks));
+                                                            DEMO_DB.students = updatedStudents; DEMO_DB.users = updatedUsers; DEMO_DB.parents = updatedParents; DEMO_DB.parent_student = updatedParentLinks;
+                                                            ['students','users','parents','parent_student'].forEach(key => persistDurableCollection(key, DEMO_DB[key]));
+                                                            setStudents(updatedStudents);
+                                                            window.dispatchEvent(new CustomEvent('aksara:students-changed'));
+                                                            window.dispatchEvent(new CustomEvent('aksara:users-changed'));
+                                                            window.dispatchEvent(new CustomEvent('aksara:parents-changed'));
+                                                            setNotice('Data murid dan akun terkait berhasil dihapus dari Firebase.');
+                                                        } catch (err) {
+                                                            console.error('[AKSARA] Gagal menghapus murid dari Firebase:', err);
+                                                            setNotice('Gagal menghapus data dari Firebase. Data tidak dinyatakan terhapus; periksa koneksi dan izin Firebase lalu coba lagi.');
+                                                        }
+                                                        setTimeout(() => setNotice(''), 4500);
+                                                    }} className="px-2 py-1 text-xs text-red-600 border rounded">Hapus</button>
                                                 </td>
                                             </tr>
                                         )
