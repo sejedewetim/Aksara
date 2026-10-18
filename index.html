@@ -913,17 +913,17 @@ var mockApiService = {
             return _context6.a(2, new Promise(function (resolve) {
               setTimeout(function () {
                 var results = DEMO_DB.examResults.filter(function (r) {
-                  return r.scheduleId === scheduleId;
+                  return !scheduleId || String(r.scheduleId || r.jadwalId || '') === String(scheduleId);
                 });
                 var detailedResults = results.map(function (r) {
                   var student = DEMO_DB.students.find(function (s) {
-                    return s.id === r.studentId;
+                    return String(s.id || s.studentId) === String(r.studentId || r.muridId);
                   });
                   var cls = DEMO_DB.classes.find(function (c) {
                     return c.id === (student === null || student === void 0 ? void 0 : student.classId);
                   });
                   return _objectSpread(_objectSpread({}, r), {}, {
-                    studentName: student === null || student === void 0 ? void 0 : student.name,
+                    studentName: r.studentName || (student === null || student === void 0 ? void 0 : student.name) || r.studentId || 'Murid tidak ditemukan',
                     nisn: student === null || student === void 0 ? void 0 : student.nisn,
                     className: cls === null || cls === void 0 ? void 0 : cls.name
                   });
@@ -1989,25 +1989,25 @@ var AdminQuestionBank = function AdminQuestionBank() {
     className: "text-sm text-gray-500"
   }, "Total Soal"), /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold"
-  }, "1,245")), /*#__PURE__*/React.createElement("div", {
+  }, DEMO_DB.questions.length.toLocaleString('id-ID'))), /*#__PURE__*/React.createElement("div", {
     className: "bg-white p-4 rounded-xl border border-gray-200 shadow-sm"
   }, /*#__PURE__*/React.createElement("p", {
     className: "text-sm text-teal-600"
   }, "Active / Approved"), /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold text-teal-700"
-  }, "980")), /*#__PURE__*/React.createElement("div", {
+  }, DEMO_DB.questions.filter(function(q){return ['ACTIVE','APPROVED','PUBLISHED','READY'].includes(String(q.status || 'ACTIVE').toUpperCase());}).length.toLocaleString('id-ID'))), /*#__PURE__*/React.createElement("div", {
     className: "bg-white p-4 rounded-xl border border-gray-200 shadow-sm"
   }, /*#__PURE__*/React.createElement("p", {
     className: "text-sm text-amber-600"
   }, "Review"), /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold text-amber-700"
-  }, "45")), /*#__PURE__*/React.createElement("div", {
+  }, DEMO_DB.questions.filter(function(q){return ['REVIEW','REVIEWED','NEEDS_REVIEW'].includes(String(q.status || '').toUpperCase());}).length.toLocaleString('id-ID'))), /*#__PURE__*/React.createElement("div", {
     className: "bg-white p-4 rounded-xl border border-gray-200 shadow-sm"
   }, /*#__PURE__*/React.createElement("p", {
     className: "text-sm text-gray-500"
   }, "Draft"), /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold"
-  }, "220"))), /*#__PURE__*/React.createElement("div", {
+  }, DEMO_DB.questions.filter(function(q){return ['DRAFT','DRAF'].includes(String(q.status || '').toUpperCase());}).length.toLocaleString('id-ID')))), /*#__PURE__*/React.createElement("div", {
     className: "bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
   }, /*#__PURE__*/React.createElement("div", {
     className: "p-4 border-b border-gray-200 bg-gray-50 flex gap-4"
@@ -2596,25 +2596,25 @@ var AdminDashboard = function AdminDashboard() {
     className: "text-gray-500 text-sm"
   }, "Sekolah"), /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold"
-  }, DEMO_DB.schools.length)), /*#__PURE__*/React.createElement("div", {
+  }, getRegisteredSchools().length)), /*#__PURE__*/React.createElement("div", {
     className: "bg-white p-5 rounded-xl border shadow-sm"
   }, /*#__PURE__*/React.createElement("p", {
     className: "text-gray-500 text-sm"
   }, "Guru"), /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold"
-  }, DEMO_DB.teachers.length)), /*#__PURE__*/React.createElement("div", {
+  }, mergeCollectionRecords('teachers').length)), /*#__PURE__*/React.createElement("div", {
     className: "bg-white p-5 rounded-xl border shadow-sm"
   }, /*#__PURE__*/React.createElement("p", {
     className: "text-gray-500 text-sm"
   }, "Murid"), /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold"
-  }, DEMO_DB.students.length)), /*#__PURE__*/React.createElement("div", {
+  }, getRegisteredStudents().length)), /*#__PURE__*/React.createElement("div", {
     className: "bg-white p-5 rounded-xl border shadow-sm"
   }, /*#__PURE__*/React.createElement("p", {
     className: "text-gray-500 text-sm"
   }, "Orang Tua"), /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold"
-  }, DEMO_DB.parents.length))));
+  }, mergeCollectionRecords('parents').length))));
 };
 var GuruDashboard = function GuruDashboard() {
   var _React$useContext10 = React.useContext(AppContext),
@@ -3414,19 +3414,80 @@ if ('serviceWorker' in navigator) {
             if (value && typeof value === 'object') return String(value.id || value.value || '').trim();
             return String(value ?? '').trim();
         };
-        const normalizeStudentProfile = (record = {}) => {
-            const schoolId = normalizeRelationId(record.schoolId || record.school_id || record.school?.id || record.sekolahId || record.sekolah?.id);
-            const classId = normalizeRelationId(record.classId || record.class_id || record.studentClassId || record.rombelId || record.rombel_id || record.class?.id || record.rombel?.id || record.kelasId || record.kelas?.id);
-            const school = DEMO_DB.schools.find(item => String(item.id) === schoolId);
-            const cls = DEMO_DB.classes.find(item => String(item.id) === classId);
-            const studentId = normalizeRelationId(record.studentId || record.student_id || record.id);
-            return { ...record, id: studentId || record.id, studentId, schoolId, classId, rombelId: classId, schoolName: record.schoolName || record.sekolahName || school?.name || '', className: record.className || record.rombelName || record.kelasName || cls?.name || '', relationStatus: schoolId && classId && school && cls && String(cls.schoolId) === schoolId ? 'LINKED' : 'UNLINKED' };
+        const relationTextKey = value => String(value ?? '').trim().toLocaleLowerCase('id-ID').replace(/\s+/g, ' ');
+        const resolveSchoolRecord = (schoolRef, schoolName = '') => {
+            const ref = normalizeRelationId(schoolRef);
+            const name = relationTextKey(schoolName || (typeof schoolRef === 'string' && !/^[A-Z0-9_-]+$/i.test(schoolRef) ? schoolRef : ''));
+            const schools = typeof getRegisteredSchools === 'function' ? getRegisteredSchools() : (DEMO_DB.schools || []);
+            return schools.find(s => [s.id,s.schoolId,s.sekolahId,s.kodeSekolah,s.npsn,s.NPSN].some(v => normalizeRelationId(v) && normalizeRelationId(v) === ref))
+                || (name ? schools.find(s => relationTextKey(s.name || s.schoolName || s.namaSekolah) === name) : null) || null;
+        };
+        const resolveClassRecord = (classRef, className = '', schoolId = '') => {
+            const ref = normalizeRelationId(classRef);
+            const label = relationTextKey(className || (ref && typeof normalizeStudentClassValue === 'function' ? studentClassLabel(normalizeStudentClassValue(ref)) : ref));
+            const classes = [...(DEMO_DB.classes || []), ...(typeof mergeCollectionRecords === 'function' ? mergeCollectionRecords('classes') : [])];
+            const schoolMatch = resolveSchoolRecord(schoolId);
+            const canonicalSchoolId = normalizeRelationId(schoolMatch?.id || schoolMatch?.schoolId || schoolMatch?.sekolahId || schoolId);
+            const unique = new Map();
+            classes.forEach(c => {
+                const cid = normalizeRelationId(c.id || c.classId || c.kelasId);
+                const cname = String(c.name || c.className || c.kelas || c.nama || cid).trim();
+                const cSchoolRaw = normalizeRelationId(c.schoolId || c.sekolahId);
+                const cSchool = resolveSchoolRecord(cSchoolRaw, c.schoolName || c.sekolahName);
+                const cSchoolId = normalizeRelationId(cSchool?.id || cSchool?.schoolId || cSchool?.sekolahId || cSchoolRaw);
+                const idMatch = !!ref && [cid, normalizeStudentClassValue(cid), normalizeStudentClassValue(cname)].some(v => String(v || '') === ref || String(v || '') === normalizeStudentClassValue(ref));
+                const labelMatch = !!label && [cname, studentClassLabel(cname), normalizeStudentClassValue(cname)].some(v => relationTextKey(v) === label || normalizeStudentClassValue(v) === normalizeStudentClassValue(label));
+                if (!(idMatch || labelMatch)) return;
+                if (canonicalSchoolId && cSchoolId && canonicalSchoolId !== cSchoolId) return;
+                const key = `${cSchoolId}::${normalizeStudentClassValue(cname) || relationTextKey(cname)}`;
+                if (!unique.has(key)) unique.set(key, { ...c, id: cid || normalizeStudentClassValue(cname), name: cname, schoolId: cSchoolId || canonicalSchoolId });
+            });
+            return [...unique.values()][0] || null;
+        };
+        const normalizeStudentProfile = (record = {}, linkedAccount = {}) => {
+            const merged = { ...linkedAccount, ...record };
+            const rawSchool = merged.schoolId || merged.school_id || merged.school?.id || merged.sekolahId || merged.sekolah?.id || '';
+            const rawSchoolName = merged.schoolName || merged.sekolahName || merged.asalSekolah || merged.school?.name || merged.sekolah?.nama || '';
+            const school = resolveSchoolRecord(rawSchool, rawSchoolName);
+            const schoolId = normalizeRelationId(school?.id || school?.schoolId || school?.sekolahId || rawSchool);
+            const rawClass = merged.classId || merged.class_id || merged.studentClassId || merged.rombelId || merged.rombel_id || merged.class?.id || merged.rombel?.id || merged.kelasId || merged.kelas?.id || merged.className || merged.rombelName || merged.kelasName || merged.kelas || '';
+            const rawClassName = merged.className || merged.rombelName || merged.kelasName || merged.class?.name || merged.rombel?.name || merged.kelas || '';
+            const cls = resolveClassRecord(rawClass, rawClassName, schoolId);
+            const classId = cls ? normalizeStudentClassValue(cls.name || cls.className || cls.id) : (typeof normalizeStudentClassValue === 'function' ? normalizeStudentClassValue(rawClass) : normalizeRelationId(rawClass));
+            const clsSchoolRaw = normalizeRelationId(cls?.schoolId || cls?.sekolahId || '');
+            const clsSchool = resolveSchoolRecord(clsSchoolRaw, cls?.schoolName || cls?.sekolahName);
+            const clsSchoolId = normalizeRelationId(clsSchool?.id || clsSchool?.schoolId || clsSchool?.sekolahId || clsSchoolRaw);
+            const studentId = normalizeRelationId(merged.studentId || merged.student_id || merged.id || merged.userId || merged.user_id);
+            const linked = !!schoolId && !!classId && !!cls && (!clsSchoolId || clsSchoolId === schoolId);
+            return { ...merged, id: normalizeRelationId(merged.id || studentId), studentId, userId: normalizeRelationId(merged.userId || merged.user_id || linkedAccount.id || ''), schoolId, sekolahId: schoolId, classId, rombelId: classId, schoolName: merged.schoolName || merged.sekolahName || school?.name || school?.schoolName || school?.namaSekolah || '', className: merged.className || merged.rombelName || merged.kelasName || cls?.name || cls?.className || studentClassLabel(classId), relationStatus: linked ? 'LINKED' : 'UNLINKED' };
         };
         const readPersistentStudents = () => {
-            let records = DEMO_DB.students || [];
-            try { const stored = JSON.parse(localStorage.getItem('aksara_students') || 'null'); if (Array.isArray(stored)) records = stored; } catch (e) {}
-            const byId = new Map(); records.map(normalizeStudentProfile).filter(item => item.studentId).forEach(item => byId.set(String(item.studentId), item));
-            const normalized = [...byId.values()]; DEMO_DB.students = normalized; return normalized;
+            let records = mergeCollectionRecords('students').map(item => ({ ...item }));
+            try { const stored = JSON.parse(localStorage.getItem('aksara_students') || 'null'); if (Array.isArray(stored) && !AKSARA_FIREBASE?.started) records = [...records, ...stored]; } catch (e) {}
+            const accounts = mergeCollectionRecords('users').filter(item => String(item?.role || item?.peran || '').toUpperCase().replace('SISWA','MURID') === 'MURID');
+            const accountFor = record => accounts.find(account => {
+                const vals = [record.userId, record.user_id, record.id, record.studentId, record.student_id, record.nisn, record.username].map(v => String(v || '').trim().toLowerCase()).filter(Boolean);
+                const accountVals = [account.id, account.userId, account.user_id, account.studentId, account.student_id, account.nisn, account.username].map(v => String(v || '').trim().toLowerCase()).filter(Boolean);
+                return vals.some(v => accountVals.includes(v));
+            });
+            const mergedRecords = [...records];
+            accounts.forEach(account => {
+                const exists = mergedRecords.some(record => accountFor(record) === account);
+                if (!exists) mergedRecords.push({ ...account, studentId: account.studentId || account.student_id || account.id, userId: account.userId || account.id });
+            });
+            const byId = new Map();
+            mergedRecords.forEach(record => {
+                const account = accountFor(record) || (String(record.role || '').toUpperCase() === 'MURID' ? record : {});
+                const normalized = normalizeStudentProfile(record, account);
+                const identity = String(normalized.studentId || normalized.userId || normalized.nisn || normalized.username || normalized.id || '').trim();
+                if (!identity) return;
+                const old = byId.get(identity);
+                byId.set(identity, old ? normalizeStudentProfile({ ...old, ...normalized }, account) : normalized);
+            });
+            const normalized = [...byId.values()];
+            DEMO_DB.students = normalized;
+            try { localStorage.setItem('aksara_students', JSON.stringify(normalized)); } catch (e) {}
+            return normalized;
         };
         const getStudentProfile = user => readPersistentStudents().find(item => String(item.studentId || item.id) === String(user?.studentId || user?.student_id || user?.id));
         const relationMessage = profile => !profile?.schoolId ? 'Profil sekolah belum tertaut. Admin Super perlu melengkapi schoolId.' : !profile?.classId ? 'Profil kelas/rombel belum tertaut. Admin Super perlu menetapkan satu kelas aktif.' : profile.relationStatus !== 'LINKED' ? 'Kelas tidak berasal dari sekolah yang tertaut. Minta Admin Super memperbaiki relasi.' : '';
@@ -3538,7 +3599,25 @@ if ('serviceWorker' in navigator) {
         };
 
         const normalizeTeacherRecord = (record) => ({ ...record, teacherId: record.teacherId || record.guruId || record.id, userId: record.userId || `USR-${record.teacherId || record.guruId || record.id}`, role: 'GURU' });
-        const persistTeacherRecord = (record) => { const normalized = normalizeTeacherRecord(record); const teachers = (DEMO_DB.teachers || []).map(item => item.id === normalized.id || item.teacherId === normalized.teacherId ? { ...item, ...normalized, updatedAt: new Date().toISOString() } : item); DEMO_DB.teachers = teachers; try { localStorage.setItem('aksara_teachers', JSON.stringify(teachers)); } catch (e) {} return normalized; };
+        const persistTeacherRecord = (record) => {
+            const normalized = normalizeTeacherRecord({ ...record, schoolId: normalizeRelationId(record.schoolId || record.sekolahId), sekolahId: normalizeRelationId(record.schoolId || record.sekolahId), classIds: canonicalTeacherClassList(record), classNames: canonicalTeacherClassList(record).map(studentClassLabel), updatedAt: new Date().toISOString() });
+            const teachers = mergeCollectionRecords('teachers');
+            const index = teachers.findIndex(item => [item.id,item.teacherId,item.guruId,item.userId].map(v=>String(v||'').trim()).some(v=>v && [normalized.id,normalized.teacherId,normalized.userId,normalized.guruId].map(x=>String(x||'').trim()).includes(v)));
+            if (index >= 0) teachers[index] = { ...teachers[index], ...normalized };
+            else teachers.push({ ...normalized, id: normalized.id || normalized.teacherId });
+            DEMO_DB.teachers = teachers;
+            const users = mergeCollectionRecords('users');
+            const userIndex = users.findIndex(item => [item.id,item.userId,item.teacherId,item.guruId,item.username,item.email].map(v=>String(v||'').trim().toLowerCase()).some(v=>v && [normalized.id,normalized.userId,normalized.teacherId,normalized.guruId,normalized.username,normalized.email].map(x=>String(x||'').trim().toLowerCase()).includes(v)));
+            const userPatch = { teacherId: normalized.teacherId, guruId: normalized.teacherId, userId: normalized.userId || normalized.id, schoolId: normalized.schoolId, sekolahId: normalized.schoolId, schoolName: normalized.schoolName || getSchoolName(normalized.schoolId), classIds: normalized.classIds || [], classNames: normalized.classNames || [], name: normalized.name, username: normalized.username, email: normalized.email, role: 'GURU', status: normalized.status || 'ACTIVE', updatedAt: normalized.updatedAt };
+            if (userIndex >= 0) users[userIndex] = { ...users[userIndex], ...userPatch };
+            else if (normalized.username || normalized.email || normalized.userId) users.push({ id: normalized.userId || normalized.id, ...userPatch });
+            DEMO_DB.users = users;
+            persistDurableCollection('teachers', teachers);
+            persistDurableCollection('users', users);
+            try { localStorage.setItem('aksara_teachers', JSON.stringify(teachers)); localStorage.setItem('aksara_users', JSON.stringify(users)); } catch (e) {}
+            window.dispatchEvent(new CustomEvent('aksara:firebase-changed'));
+            return normalized;
+        };
         const getTeacherForUser = (user) => {
             const uid = String(user?.userId || user?.id || '').trim();
             const tid = String(user?.teacherId || user?.guruId || '').trim();
@@ -3903,14 +3982,33 @@ if ('serviceWorker' in navigator) {
             getResultsSummary: async (scheduleId) => {
                 return new Promise(resolve => {
                     setTimeout(() => {
-                        const results = DEMO_DB.examResults.filter(r => r.scheduleId === scheduleId);
+                        const norm = value => String(value ?? '').trim();
+                        const allResults = Array.isArray(DEMO_DB.examResults) ? DEMO_DB.examResults : [];
+                        const results = allResults.filter(r => !norm(scheduleId) || norm(r.scheduleId || r.jadwalId) === norm(scheduleId));
                         const detailedResults = results.map(r => {
-                            const student = DEMO_DB.students.find(s => s.id === r.studentId);
-                            const cls = DEMO_DB.classes.find(c => c.id === student?.classId);
-                            return { ...r, studentName: student?.name, nisn: student?.nisn, className: cls?.name };
+                            const student = (DEMO_DB.students || []).find(s => norm(s.id || s.studentId) === norm(r.studentId || r.muridId));
+                            const attempt = (DEMO_DB.examAttempts || []).find(a => norm(a.id || a.attemptId) === norm(r.attemptId));
+                            const schedule = (DEMO_DB.examSchedules || []).find(x => norm(x.id || x.scheduleId) === norm(r.scheduleId || r.jadwalId));
+                            const pkg = (DEMO_DB.examPackages || []).find(x => norm(x.id) === norm(r.packageId || schedule?.packageId));
+                            const cls = (DEMO_DB.classes || []).find(c => norm(c.id || c.classId) === norm(student?.classId || student?.kelasId));
+                            const percentageValue = Number(r.percentage ?? r.finalScore ?? (Number(r.maxScore) > 0 ? Number(r.totalScore || 0) / Number(r.maxScore) * 100 : NaN));
+                            return { ...r,
+                                id: r.id || `RESULT-${r.attemptId || r.studentId || Math.random().toString(36).slice(2)}`,
+                                studentId: r.studentId || r.muridId || student?.id || '',
+                                studentName: r.studentName || student?.name || student?.nama || 'Murid tidak ditemukan',
+                                nisn: r.nisn || student?.nisn || student?.nis || '',
+                                className: r.className || cls?.name || cls?.className || '-',
+                                scheduleId: r.scheduleId || r.jadwalId || schedule?.id || '',
+                                examName: r.examName || schedule?.name || pkg?.name || '-',
+                                percentage: Number.isFinite(percentageValue) ? percentageValue.toFixed(2) : '-',
+                                correctCount: Number.isFinite(Number(r.correctCount)) ? Number(r.correctCount) : 0,
+                                incorrectCount: Number.isFinite(Number(r.incorrectCount)) ? Number(r.incorrectCount) : 0,
+                                attemptStatus: r.attemptStatus || attempt?.status || '-',
+                                correctionStatus: r.correctionStatus || r.status || '-'
+                            };
                         });
                         resolve({ success: true, data: detailedResults });
-                    }, 500);
+                    }, 100);
                 });
             },
             getMyResults: async (studentId) => {
@@ -4685,7 +4783,52 @@ if ('serviceWorker' in navigator) {
         const normalizeStudentClassValue = value => { const raw=String(value??'').trim(); if(!raw) return ''; const compact=raw.toUpperCase().replace(/[^0-9AB]/g,''); const m=compact.match(/(?:^|(?:CLS|KELAS|CLASS))([1-6])([AB])$/); return m ? `KELAS-${m[1]}${m[2]}` : raw; };
         const studentClassLabel = value => { const id=normalizeStudentClassValue(value); const found=AKSARA_STUDENT_CLASS_OPTIONS.find(x=>x.value===id); return found?.label || String(value||''); };
         const normalizeStudentGender = value => { const raw=String(value??'').trim().toUpperCase(); if(['L','LAKI-LAKI','LAKI LAKI','MALE'].includes(raw)) return 'L'; if(['P','PEREMPUAN','WANITA','FEMALE'].includes(raw)) return 'P'; return ''; };
-        const syncTeacherClassAssignments = (teacher, previousClassIds=[]) => { const teacherId=String(teacher?.teacherId||teacher?.guruId||teacher?.id||'').trim(); const schoolId=String(teacher?.schoolId||teacher?.sekolahId||'').trim(); const classIds=normalizeTeacherClassIds(teacher?.classIds||teacher?.kelasIds||teacher?.classId||teacher?.kelasId); const oldIds=normalizeTeacherClassIds(previousClassIds); if(!teacherId) return; const classes=mergeCollectionRecords('classes'); const updated=classes.map(c=>{ const cid=String(c?.id||c?.classId||c?.kelasId||'').trim(); if(!cid) return c; const belongs=classIds.includes(cid); const was=oldIds.includes(cid); if(belongs && (!schoolId || String(c?.schoolId||c?.sekolahId||'')===schoolId)) return {...c,homeroomTeacherId:teacherId,teacherId:teacherId,guruId:teacherId,schoolId:c.schoolId||schoolId,schoolName:c.schoolName||teacher.schoolName||getSchoolName(schoolId),status:c.status||'ACTIVE'}; if(was && String(c?.homeroomTeacherId||c?.teacherId||c?.guruId||c?.waliKelasId||'')===teacherId) { const next={...c}; delete next.homeroomTeacherId; delete next.teacherId; delete next.guruId; return next; } return c; }); DEMO_DB.classes=updated; persistDurableCollection('classes',updated); window.dispatchEvent(new CustomEvent('aksara:classes-changed')); };
+        const ensureSchoolClassRecords = (schoolId, classValues = [], teacherId = '') => {
+            const sid = String(schoolId || '').trim();
+            if (!sid) return [];
+            const values = [...new Set(normalizeTeacherClassIds(classValues).map(canonicalTeacherClassId).filter(v => /^KELAS-[1-6][AB]$/.test(v)))];
+            const classes = mergeCollectionRecords('classes');
+            const normalizeSchool = value => { const ref = String(value || '').trim(); const school = resolveSchoolRecord(ref); return String(school?.id || school?.schoolId || school?.sekolahId || ref).trim(); };
+            const canonicalOf = c => canonicalTeacherClassId(c?.name || c?.className || c?.kelas || c?.nama || c?.id || c?.classId || c?.kelasId || '');
+            let changed = false;
+            values.forEach(value => {
+                const existingIndex = classes.findIndex(c => canonicalOf(c) === value && normalizeSchool(c.schoolId || c.sekolahId) === normalizeSchool(sid));
+                const label = studentClassLabel(value);
+                if (existingIndex >= 0) {
+                    const current = classes[existingIndex];
+                    const updated = { ...current, id: current.id || current.classId || current.kelasId || `CLS-${sid}-${value.replace('KELAS-','')}`, classId: current.classId || current.id || `CLS-${sid}-${value.replace('KELAS-','')}`, name: current.name || current.className || label, className: current.className || current.name || label, schoolId: sid, sekolahId: sid, schoolName: current.schoolName || getSchoolName(sid), status: current.status || 'ACTIVE' };
+                    if (teacherId) { updated.homeroomTeacherId = teacherId; updated.teacherId = teacherId; updated.guruId = teacherId; }
+                    classes[existingIndex] = updated; changed = true;
+                } else {
+                    const suffix = value.replace('KELAS-', ''); const safeSchool = sid.replace(/[^A-Za-z0-9_-]/g, '-');
+                    classes.push({ id: `CLS-${safeSchool}-${suffix}`, classId: `CLS-${safeSchool}-${suffix}`, name: label, className: label, grade: Number(suffix[0]), section: suffix[1], schoolId: sid, sekolahId: sid, schoolName: getSchoolName(sid), status: 'ACTIVE', ...(teacherId ? { homeroomTeacherId: teacherId, teacherId, guruId: teacherId } : {}) });
+                    changed = true;
+                }
+            });
+            if (changed) { DEMO_DB.classes = classes; persistDurableCollection('classes', classes); window.dispatchEvent(new CustomEvent('aksara:classes-changed')); }
+            return classes;
+        };
+        const syncTeacherClassAssignments = (teacher, previousClassIds=[]) => {
+            const teacherId=String(teacher?.teacherId||teacher?.guruId||teacher?.id||'').trim();
+            const schoolId=String(teacher?.schoolId||teacher?.sekolahId||'').trim();
+            const classIds=normalizeTeacherClassIds(teacher?.classIds||teacher?.kelasIds||teacher?.classId||teacher?.kelasId).map(canonicalTeacherClassId);
+            const oldIds=normalizeTeacherClassIds(previousClassIds).map(canonicalTeacherClassId);
+            if(!teacherId) return;
+            const classes=mergeCollectionRecords('classes');
+            const classKey = c => canonicalTeacherClassId(c?.name||c?.className||c?.kelas||c?.nama||c?.id||c?.classId||c?.kelasId||'');
+            const schoolKey = c => String(resolveSchoolRecord(c?.schoolId||c?.sekolahId, c?.schoolName||c?.sekolahName)?.id || c?.schoolId || c?.sekolahId || '').trim();
+            const updated=classes.map(c=>{
+                const cid=String(c?.id||c?.classId||c?.kelasId||'').trim(); if(!cid) return c;
+                const canonical=classKey(c), belongs=classIds.includes(cid)||classIds.includes(canonical), was=oldIds.includes(cid)||oldIds.includes(canonical), cSchool=schoolKey(c);
+                if(belongs && (!schoolId || !cSchool || cSchool===schoolId)) return {...c,homeroomTeacherId:teacherId,teacherId:teacherId,guruId:teacherId,schoolId:cSchool||schoolId,sekolahId:cSchool||schoolId,schoolName:c.schoolName||teacher.schoolName||getSchoolName(schoolId),status:c.status||'ACTIVE'};
+                if(was && String(c?.homeroomTeacherId||c?.teacherId||c?.guruId||c?.waliKelasId||'')===teacherId) { const next={...c}; delete next.homeroomTeacherId; delete next.teacherId; delete next.guruId; return next; }
+                return c;
+            });
+            DEMO_DB.classes=updated; persistDurableCollection('classes',updated);
+            ensureSchoolClassRecords(schoolId, classIds, teacherId);
+            window.dispatchEvent(new CustomEvent('aksara:classes-changed'));
+        };
+
         const safeImportValue = value => String(value ?? '').replace(/[=+@\\-].*/,'').trim();
         const canonicalImport = (row, kind) => { const spec=importAliases[kind]; const out={}; Object.entries(row||{}).forEach(([key,value])=>{ if(!/(password|token|secret|apikey|api_key|credential)/i.test(key)) out[key]=safeImportValue(value); }); const pick=(keys)=>keys.map(k=>out[k]).find(v=>v); out.id=pick(spec.id)||pick(spec.natural)||`${kind.slice(0,-1).toUpperCase()}-${Date.now()}-${Math.random().toString(36).slice(2,7)}`; out.name=pick(['nama','namaSekolah','name'])||''; if(kind==='teachers'){ out.classIds=[...new Set(normalizeTeacherClassIds(out.classIds||out.kelasIds||out.classId||out.kelasId).map(canonicalTeacherClassId).filter(Boolean))]; out.classNames=out.classIds.map(studentClassLabel); out.schoolId=String(out.schoolId||out.sekolahId||'').trim(); const importedSchool=getRegisteredSchools().find(s=>String(s?.id||s?.schoolId||s?.sekolahId||s?.npsn||'').trim()===out.schoolId || String(s?.name||s?.schoolName||s?.namaSekolah||'').trim().toLowerCase()===String(out.schoolName||out.sekolahName||out.asalSekolah||'').trim().toLowerCase()); if(importedSchool){out.schoolId=String(importedSchool.id||importedSchool.schoolId||importedSchool.sekolahId||'').trim(); out.sekolahId=out.schoolId; out.schoolName=importedSchool.name||importedSchool.schoolName||importedSchool.namaSekolah||''; out.sekolahName=out.schoolName;} out.teacherId=String(out.teacherId||out.guruId||out.id||'').trim(); out.status=String(out.status||'ACTIVE').toUpperCase(); } else if(kind==='students'){ out.schoolId=String(out.schoolId||out.sekolahId||'').trim(); out.classId=normalizeStudentClassValue(out.classId||out.kelasId||out.kelas||out.className); out.className=studentClassLabel(out.classId); out.gender=normalizeStudentGender(out.gender||out.jenisKelamin||out.jenis_kelamin||out.jk); out.jenisKelamin=out.gender; out.status=String(out.status||'ACTIVE').toUpperCase(); } return out; };
         const MasterImportPanel = ({ kind }) => { const spec=importAliases[kind]; const { user }=React.useContext(AppContext); const allowed=user?.role==='ADMIN_SUPER' && !!spec?.entity; const [open,setOpen]=React.useState(false); const [file,setFile]=React.useState(null); const [rows,setRows]=React.useState([]); const [errors,setErrors]=React.useState([]); const [mode,setMode]=React.useState('merge'); const [notice,setNotice]=React.useState(''); const [jsonText,setJsonText]=React.useState(''); const [validated,setValidated]=React.useState(false); const inputRef=React.useRef(null); const exampleRecord=kind==='schools'?{id:'ISI_SCHOOL_ID',name:'ISI_NAMA_SEKOLAH',npsn:'ISI_NPSN',district:'ISI_KECAMATAN',address:'ISI_ALAMAT',principalName:'ISI_NAMA_KEPALA_SEKOLAH',phone:'ISI_NOMOR_TELEPON',status:'ACTIVE'}:kind==='teachers'?{id:'ISI_TEACHER_ID',name:'ISI_NAMA_GURU',nip:'ISI_NIP_ATAU_NUPTK',email:'ISI_EMAIL',phone:'ISI_NOMOR_TELEPON',schoolId:'ISI_SCHOOL_ID',district:'ISI_KECAMATAN',username:'ISI_USERNAME',classIds:['ISI_CLASS_ID_1','ISI_CLASS_ID_2'],classNames:['VI A','VI B'],status:'ACTIVE'}:{id:'ISI_STUDENT_ID',name:'ISI_NAMA_MURID',nisn:'ISI_NISN',jenisKelamin:'L',schoolId:'ISI_SCHOOL_ID',classId:'KELAS-6A',className:'Kelas 6 A',parentName:'ISI_NAMA_WALI',status:'ACTIVE',username:'ISI_USERNAME'}; const example=JSON.stringify({schemaVersion:'1.0',entity:spec.entity,records:[exampleRecord],metadata:{instructions:'Ganti semua nilai ISI_ sebelum Validasi JSON.'}},null,2); const validateJson=()=>{try{const payload=JSON.parse(jsonText); if(!payload||payload.schemaVersion!=='1.0'||!Array.isArray(payload.records)||payload.entity!==spec.entity) throw new Error(`Struktur wajib: schemaVersion "1.0", entity "${spec.entity}" untuk menu ${spec.label}, dan records berupa array.`); const placeholders=payload.records.flatMap((r,i)=>Object.entries(r).filter(([,v])=>typeof v==='string'&&v.startsWith('ISI_')).map(([k])=>`Baris ${i+1}, field ${k}: ganti placeholder terlebih dahulu`)); if(placeholders.length) throw new Error(placeholders.join(' · ')); if(!payload||payload.schemaVersion!=='1.0'||!Array.isArray(payload.records)||payload.entity!==spec.entity) throw new Error(`Struktur wajib: schemaVersion "1.0", entity "${spec.entity}" untuk menu ${spec.label}, dan records berupa array.`); const parsed=payload.records.map(r=>canonicalImport(r,kind)); const bad=parsed.flatMap((r,i)=>[...spec.required.filter(k=>!r[k]&&!r.name).map(k=>`Baris ${i+1}, field ${k}: wajib diisi`),...(kind==='students'&&!r.gender?[`Baris ${i+1}, field jenisKelamin: wajib diisi (L/P)`]:[]),...(kind==='students'&&!r.classId?[`Baris ${i+1}, field classId: wajib diisi (KELAS-1A sampai KELAS-6B)`]:[])]); setFile({name:'JSON copy-paste'}); setRows(parsed); setErrors(bad); setValidated(true); setNotice('');}catch(error){setValidated(false);setRows([]);setErrors([`JSON tidak valid: ${error.message}`]);setNotice('');}}; const read=async e=>{const f=e.target.files?.[0];e.target.value='';if(!f)return;if(f.size>25*1024*1024)return setNotice('File maksimal 25 MB.');if(!/\\.(json|xlsx|xls)$/i.test(f.name))return setNotice('Gunakan JSON atau Excel.');try{let raw=[];if(/json$/i.test(f.name)){const p=JSON.parse(await f.text());raw=Array.isArray(p)?p:(p.records||[]);}else{const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});raw=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});}const parsed=raw.map(r=>canonicalImport(r,kind));const bad=parsed.flatMap((r,i)=>[spec.required.some(k=>!r[k]&&!r.name)?`Baris ${i+2}: nama wajib diisi`:null,kind==='students'&&!r.gender?`Baris ${i+2}: jenisKelamin wajib diisi (L/P)`:null,kind==='students'&&!r.classId?`Baris ${i+2}: classId wajib diisi (KELAS-1A sampai KELAS-6B)`:null].filter(Boolean));setFile(f);setRows(parsed);setErrors(bad);setNotice('');setOpen(true);}catch(err){setNotice('File tidak dapat dibaca: '+err.message);}}; const downloadJson=()=>{const fields=kind==='schools'?['schoolId','kodeSekolah','namaSekolah','npsn','alamat','provinsi','kabupatenKota','kecamatan','email','telepon','kepalaSekolah','status']:kind==='teachers'?['teacherId','userId','nip','nuptk','nama','email','username','telepon','schoolId','subjectIds','classIds','role','status']:['studentId','userId','nis','nisn','nama','email','username','tanggalLahir','jenisKelamin','schoolId','classId','parentIds','status'];const blob=new Blob([JSON.stringify({schemaVersion:1,entity:spec.entity,exportedAt:new Date().toISOString(),records:fields.reduce((o,k)=>(o[k]='',o),{}),metadata:{fields,instructions:'Isi records sebagai array. Jangan sertakan password, token, secret, API key, atau kredensial.'}},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`format-${kind}.json`;a.click();}; const downloadXlsx=()=>{const fields=kind==='schools'?['schoolId','kodeSekolah','namaSekolah','npsn','alamat','provinsi','kabupatenKota','kecamatan','email','telepon','kepalaSekolah','status']:kind==='teachers'?['teacherId','userId','nip','nuptk','nama','email','username','telepon','schoolId','subjectIds','classIds','role','status']:['studentId','userId','nis','nisn','nama','email','username','tanggalLahir','jenisKelamin','schoolId','classId','parentIds','status'];const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([fields]),'Data');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['Petunjuk'],['Satu baris untuk satu record. Gunakan ID permanen atau kunci alami. Jangan isi password, token, secret, API key, atau kredensial.']]),'Petunjuk');XLSX.writeFile(wb,`template-${kind}.xlsx`);}; const apply=()=>{if(!allowed||errors.length)return;const target=DEMO_DB[spec.target]||[];const index=new Map((mode==='replace'?[]:target).map(x=>[String(x.id),x]));let added=0,updated=0;rows.forEach(r=>{const old=index.get(String(r.id));index.set(String(r.id),old?{...old,...r}:r);old?updated++:added++;});DEMO_DB[spec.target]=[...index.values()]; if(kind==='teachers'){ DEMO_DB.teachers.forEach(t=>{ t.classIds=normalizeTeacherClassIds(t.classIds||t.kelasIds||t.classId||t.kelasId); t.classNames=normalizeTeacherClassIds(t.classNames||t.kelas||t.className); syncTeacherClassAssignments(t); const existingUser=mergeCollectionRecords('users').find(u=>String(u.teacherId||u.userId||u.id||'')===String(t.teacherId||t.id)); if(existingUser){ Object.assign(existingUser,{teacherId:t.teacherId||t.id,userId:t.userId||existingUser.userId,schoolId:t.schoolId,schoolName:t.schoolName,name:t.name,username:t.username,email:t.email,role:'GURU',status:t.status||'ACTIVE'}); } }); persistDurableCollection('teachers',DEMO_DB.teachers); persistDurableCollection('users',DEMO_DB.users||[]); } else { persistDurableCollection(spec.target,DEMO_DB[spec.target]); } try{localStorage.setItem(`aksara_${spec.target}`,JSON.stringify(DEMO_DB[spec.target]));const logs=JSON.parse(localStorage.getItem(IMPORT_LOG_KEY)||'[]');logs.unshift({actorId:user.id,actorName:user.name,createdAt:new Date().toISOString(),entity:spec.entity,fileName:file?.name,mode,added,updated,errors:errors.length});localStorage.setItem(IMPORT_LOG_KEY,JSON.stringify(logs.slice(0,100)));}catch(e){}setOpen(false);setNotice(`Impor ${spec.label} selesai: ${added} ditambah, ${updated} diperbarui.`);}; return <div className="mt-4 flex flex-wrap gap-2"><button disabled={!allowed} onClick={()=>{setJsonText('');setRows([]);setErrors([]);setValidated(false);setOpen(true)}} className="px-3 py-2 bg-aksara-600 text-white rounded-lg text-sm disabled:opacity-50">Impor JSON</button><button disabled={!allowed} onClick={()=>inputRef.current?.click()} className="px-3 py-2 bg-aksara-600 text-white rounded-lg text-sm disabled:opacity-50">Impor Excel</button><button onClick={()=>{const fields=kind==='teachers'?['teacherId','userId','nip','nuptk','nama','email','username','telepon','schoolId','classIds','classNames','role','status']:null;if(fields){const blob=new Blob([JSON.stringify({schemaVersion:1,entity:'teachers',exportedAt:new Date().toISOString(),records:[fields.reduce((o,k)=>(o[k]=k==='classIds'||k==='classNames'?[]:'',o),{})]},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='format-teachers.json';a.click();}else{downloadJson();}}} className="px-3 py-2 border rounded-lg text-sm">Unduh Template JSON</button><button onClick={downloadXlsx} className="px-3 py-2 border rounded-lg text-sm">Unduh Template Excel</button><input ref={inputRef} type="file" accept=".json,.xlsx,.xls,application/json" onChange={read} className="hidden" />{notice&&<span role="status" className="text-sm text-teal-700 self-center">{notice}</span>}{open&&<div role="dialog" aria-modal="true" className="fixed inset-0 z-[999] flex items-start sm:items-center justify-center p-2 sm:p-4 bg-gray-900/50 overflow-y-auto"><div className="bg-white rounded-2xl p-4 sm:p-6 w-full max-w-2xl max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden"><div className="flex items-start justify-between gap-3 shrink-0"><h3 className="text-xl font-bold break-words">Impor JSON — {spec.label}</h3><button type="button" aria-label="Tutup" onClick={()=>setOpen(false)} className="shrink-0 text-2xl leading-none text-gray-500 hover:text-gray-900">×</button></div><p className="text-sm text-gray-500 mt-2 shrink-0">Tempel JSON resmi di bawah. Contoh ini hanya instruksi dan tidak akan diimpor.</p><div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1"><pre aria-label={`Contoh format JSON ${spec.label}`} tabIndex="0" className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-indigo-100 bg-indigo-50/50 p-3 font-mono text-xs text-gray-700 select-text">{example}</pre><p className="text-xs text-gray-500 mt-2">Contoh di atas hanya petunjuk dan dapat diseleksi lalu disalin manual. Field wajib: {spec.required.join(', ')}. Field lain pada contoh bersifat opsional. Ganti semua placeholder ISI_ sebelum Validasi JSON; contoh tidak mengisi atau menyimpan editor secara otomatis.</p><textarea aria-label="JSON untuk diimpor" value={jsonText} onChange={e=>{setJsonText(e.target.value);setValidated(false)}} placeholder="Tempel JSON Anda di sini..." className="mt-3 w-full min-h-48 h-48 resize-y border rounded-lg p-3 font-mono text-xs"/><p className="text-sm text-gray-500 mt-3">{file?.name} · {rows.length} record · {errors.length} error fatal</p>{errors.length>0&&<div className="mt-3 p-3 bg-red-50 text-red-700 rounded-lg text-sm">{errors.join(' · ')}</div>}<label className="block mt-4 text-sm font-medium">Mode<select value={mode} onChange={e=>setMode(e.target.value)} className="mt-1 w-full border rounded-lg p-2"><option value="merge">Gabungkan / Upsert</option>{allowed&&<option value="replace">Ganti data</option>}</select></label><div className="max-h-48 overflow-auto mt-4 border rounded-lg"><pre className="p-3 text-xs">{JSON.stringify(rows.slice(0,5),null,2)}</pre></div></div><div className="flex flex-wrap justify-end gap-3 mt-5 pt-4 border-t shrink-0"><button onClick={validateJson} className="px-4 py-2 border border-aksara-600 text-aksara-600 rounded-lg">Validasi JSON</button><button onClick={()=>setOpen(false)} className="px-4 py-2 bg-gray-100 rounded-lg">Batal</button>{errors.length>0&&<button onClick={()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([errors.join('\\n')],{type:'text/plain'}));a.download='laporan-validasi.txt';a.click();}} className="px-4 py-2 border rounded-lg">Unduh Laporan Validasi</button>}<button disabled={!validated||errors.length>0||!allowed} onClick={apply} className="px-4 py-2 bg-aksara-600 text-white rounded-lg disabled:opacity-50">Terapkan Impor</button></div></div></div>}</div>; };
@@ -4822,7 +4965,39 @@ if ('serviceWorker' in navigator) {
             });
             return out;
         };
-        const getRegisteredSchools = () => mergeCollectionRecords('schools').filter(s => s && s.id && (s.name || s.schoolName));
+        const getRegisteredSchools = () => {
+            // Saat Firebase sudah selesai dihidrasi, DEMO_DB adalah snapshot kanonis.
+            // Jangan menggabungkan cache browser lama karena record yang sudah dihapus
+            // dapat muncul lagi dan membuat jumlah sekolah lebih besar dari daftar aktual.
+            const source = AKSARA_FIREBASE?.started
+                ? normalizeCollectionArray(DEMO_DB.schools)
+                : mergeCollectionRecords('schools');
+            const result = [];
+            const byId = new Map(), byNpsn = new Map(), byName = new Map();
+            const norm = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+            source.forEach(raw => {
+                if (!raw || typeof raw !== 'object') return;
+                const item = { ...raw };
+                const id = norm(item.id || item.schoolId || item.sekolahId || item.kodeSekolah);
+                const npsn = norm(item.npsn || item.NPSN);
+                const name = norm(item.name || item.schoolName || item.namaSekolah);
+                if (!id && !npsn && !name) return;
+                let index = (id && byId.get(id)) ?? (npsn && byNpsn.get(npsn)) ?? (!npsn && name && byName.get(name));
+                if (index !== undefined && index !== null) {
+                    // Record paling baru pada source menang, data pelengkap tetap dipertahankan.
+                    result[index] = { ...result[index], ...item };
+                } else {
+                    index = result.length;
+                    result.push(item);
+                }
+                const saved = result[index];
+                [saved.id, saved.schoolId, saved.sekolahId, saved.kodeSekolah].map(norm).filter(Boolean).forEach(v => byId.set(v, index));
+                [saved.npsn, saved.NPSN].map(norm).filter(Boolean).forEach(v => byNpsn.set(v, index));
+                const savedName = norm(saved.name || saved.schoolName || saved.namaSekolah);
+                if (savedName) byName.set(savedName, index);
+            });
+            return result.filter(s => s && (s.id || s.schoolId || s.sekolahId) && (s.name || s.schoolName || s.namaSekolah));
+        };
         const getSchoolName = (schoolId, fallbackName = '') => {
             const ref = String(schoolId ?? '').trim();
             const fallback = String(fallbackName ?? '').trim();
@@ -4943,21 +5118,56 @@ if ('serviceWorker' in navigator) {
         };
 
         const getActualRegisteredUsers = () => {
-            const out = []; const seen = new Set();
-            const add = (record, role) => {
-                if (!record || String(record.status || 'ACTIVE').toUpperCase() !== 'ACTIVE') return;
-                const id = String(record.userId || record.id || record.studentId || record.teacherId || record.parentId || record.nisn || record.username || '').trim();
-                if (!id) return;
-                const key = `${role}:${id}`;
-                if (seen.has(key)) return;
-                seen.add(key); out.push({ ...record, role });
+            // Akun pengguna adalah gabungan akun pusat dan profil role yang memang
+            // dapat dipakai untuk login oleh resolver AKSARA versi lama.
+            const canonical = key => AKSARA_FIREBASE?.started
+                ? normalizeCollectionArray(DEMO_DB[key])
+                : mergeCollectionRecords(key);
+            const out = [];
+            const roleOf = record => {
+                let role = String(record?.role || record?.peran || '').trim().toUpperCase();
+                if (['ADMIN','ADMINISTRATOR','SUPERADMIN','SUPER_ADMIN','ADMIN_SUPER'].includes(role)) return 'ADMIN_SUPER';
+                if (['TEACHER','GURU'].includes(role)) return 'GURU';
+                if (['STUDENT','MURID','SISWA'].includes(role)) return 'MURID';
+                if (['PARENT','WALI','ORANG TUA','ORANGTUA','ORANG_TUA'].includes(role)) return 'ORANG_TUA';
+                return role;
             };
-            mergeCollectionRecords('teachers').forEach(r => add(r, 'GURU'));
-            getRegisteredStudents().forEach(r => add(r, 'MURID'));
-            mergeCollectionRecords('parents').forEach(r => add(r, 'ORANG_TUA'));
+            const roleSources = [
+                ...canonical('users').map(r => ({ record:r, role:roleOf(r) })),
+                ...canonical('teachers').map(record => ({ record, role:'GURU' })),
+                ...getRegisteredStudents().map(record => ({ record, role:'MURID' })),
+                ...canonical('parents').map(record => ({ record, role:'ORANG_TUA' }))
+            ];
+            const norm = value => String(value ?? '').trim().toLowerCase();
+            const identityFields = record => [record.username, record.userName, record.email, record.nisn, record.nis, record.nip, record.nuptk].map(norm).filter(Boolean);
+            roleSources.forEach(({record, role}) => {
+                if (!record || !role) return;
+                const id = String(record.id || record.userId || record.studentId || record.teacherId || record.parentId || '').trim();
+                const username = String(record.username || record.userName || record.email || record.nisn || record.nis || record.nip || record.nuptk || '').trim();
+                if (!id && !username) return;
+                const fields = identityFields(record);
+                let index = out.findIndex(existing => existing.role === role && (
+                    (id && [existing.id, existing.userId, existing.studentId, existing.teacherId, existing.parentId].some(v => String(v || '').trim() === id)) ||
+                    fields.some(value => identityFields(existing).includes(value))
+                ));
+                const normalized = { ...record, role, id: record.id || record.userId || record.studentId || record.teacherId || record.parentId || id, username: record.username || record.userName || record.email || record.nisn || record.nis || record.nip || record.nuptk || '' };
+                if (index >= 0) {
+                    // Profil master melengkapi akun, tetapi nilai yang sudah tersedia tidak dihapus.
+                    out[index] = { ...out[index], ...normalized };
+                } else out.push(normalized);
+            });
             return out;
         };
-        const getActualActiveUserCount = () => getActualRegisteredUsers().length;
+        const aksaraAccountIsActiveForCount = record => {
+            const status = String(record?.status ?? record?.accountStatus ?? record?.account_status ?? record?.state ?? 'ACTIVE').trim().toUpperCase();
+            return record?.active !== false && record?.aktif !== false && !['INACTIVE','NONAKTIF','SUSPENDED','DISABLED','BLOCKED','DELETED','PENDING'].includes(status);
+        };
+        const aksaraAccountCanLogin = record => {
+            const identifier = String(record?.username || record?.userName || record?.email || record?.nisn || record?.nis || record?.nip || record?.nuptk || '').trim();
+            const password = String(record?.password || record?.kataSandi || record?.kata_sandi || record?.['kata sandi'] || record?.pass || record?.passwordPlain || record?.plainPassword || record?.loginPassword || record?.login_password || record?.passcode || record?.pin || '').trim();
+            return !!identifier && aksaraAccountIsActiveForCount(record) && (!!password || !!record?.firebaseUid || !!record?.firebaseUID);
+        };
+        const getActualActiveUserCount = () => getActualRegisteredUsers().filter(aksaraAccountCanLogin).length;
 
         const useAksaraDataRefresh = () => {
             const [, setTick] = React.useState(0);
@@ -5031,7 +5241,7 @@ if ('serviceWorker' in navigator) {
                 const canonicalSchoolName = String(selectedSchool?.name || selectedSchool?.schoolName || selectedSchool?.namaSekolah || getSchoolName(canonicalSchoolId, form.schoolName || form.sekolahName || '') || '').trim();
                 const next = { ...existing, ...form, id: editingId || `TCH-${Date.now()}`, teacherId: existing?.teacherId || editingId || `TCH-${Date.now()}`, userId: existing?.userId || `USR-GURU-${editingId || Date.now()}`, schoolId: canonicalSchoolId, sekolahId: canonicalSchoolId, schoolName: canonicalSchoolName, sekolahName: canonicalSchoolName, name: form.name.trim(), username, password };
                 const previous = existing?.classIds || existing?.kelasIds || existing?.classId || existing?.kelasId || []; next.classIds = [...new Set(normalizeTeacherClassIds(form.classIds).map(canonicalTeacherClassId).filter(Boolean))]; next.classNames = next.classIds.map(studentClassLabel); const updated = editingId ? teachers.map(t => t.id === editingId ? next : t) : [...teachers, next];
-                DEMO_DB.teachers = updated; setTeachers(updated); persistDurableCollection('teachers', updated); syncTeacherClassAssignments(next, previous);
+                DEMO_DB.teachers = updated; setTeachers(updated); persistDurableCollection('teachers', updated); syncTeacherClassAssignments(next, previous); ensureSchoolClassRecords(next.schoolId, next.classIds, next.teacherId);
                 const teacherUser = { id: next.userId, userId: next.userId, teacherId: next.teacherId, guruId: next.teacherId, username: next.username, password: next.password, name: next.name, email: next.email, phone: next.phone, schoolId: next.schoolId, sekolahId: next.schoolId, schoolName: next.schoolName, sekolahName: next.schoolName, classIds: next.classIds || [], kelasIds: next.classIds || [], classNames: next.classNames || [], kelas: next.classNames || [], role: 'GURU', status: next.status || 'ACTIVE' };
                 const existingUsers = mergeCollectionRecords('users').filter(u => String(u.id || u.userId || '') !== String(teacherUser.id));
                 DEMO_DB.users = [...existingUsers, teacherUser];
@@ -5095,6 +5305,7 @@ if ('serviceWorker' in navigator) {
                 const canonical = existingById || existingByNisn || {};
                 const canonicalId = String(canonical.studentId || canonical.id || editingId || `STD-${Date.now()}-${Math.random().toString(36).slice(2,7)}`).trim();
                 const next = { ...canonical, ...form, id: canonicalId, studentId: canonical.studentId || canonicalId, userId: canonical.userId || `USR-STU-${canonicalId}`, name, nisn, schoolId, sekolahId: schoolId, schoolName: getSchoolName(schoolId), classId, kelasId: classId, className, kelas: className, gender, jenisKelamin: gender, status: form.status || 'ACTIVE', parentName, username: form.username.trim() || canonical.username || nisn, password: form.password || canonical.password || nisn, updatedAt: new Date().toISOString() };
+                ensureSchoolClassRecords(schoolId, [classId]);
                 // Konsolidasikan semua record dengan NISN yang sama menjadi satu murid.
                 const studentMap = new Map();
                 [...students, next].forEach(s => {
@@ -5850,7 +6061,7 @@ if ('serviceWorker' in navigator) {
                 {error && !editing && <div role="alert" className="p-3 rounded-lg border border-red-200 bg-red-50 text-red-700">{error}</div>}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                     <div className="overflow-x-auto"><table className="w-full text-left border-collapse"><thead><tr className="bg-gray-50/50 border-b border-gray-200 text-xs uppercase text-gray-500 font-semibold"><th className="px-6 py-4">Nama Paket & Info</th><th className="px-6 py-4">Bank Soal</th><th className="px-6 py-4">Durasi</th><th className="px-6 py-4">Status</th><th className="px-6 py-4 text-right">Aksi</th></tr></thead>
-                    <tbody className="divide-y divide-gray-100 text-sm">{packages.map(pkg => <tr key={pkg.id} className="hover:bg-gray-50"><td className="px-6 py-4"><div className="font-bold text-gray-900">{pkg.name}</div><div className="text-gray-500 text-xs">{subjects.find(s => String(s.id) === String(pkg.subjectId))?.name || pkg.subjectId || '-'}{pkg.grade ? ` • Kelas ${pkg.grade}` : ''}</div></td><td className="px-6 py-4 text-gray-600 text-xs">{(pkg.questionIds || pkg.bankQuestionIds || []).length || pkg.totalQuestions || 0} Soal</td><td className="px-6 py-4 text-gray-600 text-xs">{pkg.duration || 0} Menit</td><td className="px-6 py-4"><Badge status={pkg.status || 'DRAFT'} /></td><td className="px-6 py-4 text-right whitespace-nowrap"><button onClick={() => openView(pkg)} className="text-aksara-600 mr-3">Lihat</button><button onClick={() => openEdit(pkg)} className="text-amber-600 mr-3">Edit</button><button onClick={() => remove(pkg)} className="text-red-600">Hapus</button></td></tr>)}{!packages.length && <tr><td colSpan="5" className="p-10 text-center text-gray-500">Belum ada paket ujian.</td></tr>}</tbody></table></div>
+                    <tbody className="divide-y divide-gray-100 text-sm">{packages.map(pkg => <tr key={pkg.id} className="hover:bg-gray-50"><td className="px-6 py-4"><div className="font-bold text-gray-900">{pkg.name}</div><div className="text-gray-500 text-xs">{subjects.find(s => String(s.id) === String(pkg.subjectId))?.name || pkg.subjectId || '-'}{pkg.grade ? ` • Kelas ${pkg.grade}` : ''}</div></td><td className="px-6 py-4 text-gray-600 text-xs">{(Array.isArray(pkg.questionIds) && pkg.questionIds.length ? pkg.questionIds : Array.isArray(pkg.bankQuestionIds) ? pkg.bankQuestionIds : []).filter(qid => allQuestions.some(q => String(q.id) === String(qid) && ['ACTIVE','APPROVED','PUBLISHED','READY'].includes(String(q.status || 'ACTIVE').toUpperCase()))).length} soal tersedia</td><td className="px-6 py-4 text-gray-600 text-xs">{pkg.duration || 0} Menit</td><td className="px-6 py-4"><Badge status={pkg.status || 'DRAFT'} /></td><td className="px-6 py-4 text-right whitespace-nowrap"><button onClick={() => openView(pkg)} className="text-aksara-600 mr-3">Lihat</button><button onClick={() => openEdit(pkg)} className="text-amber-600 mr-3">Edit</button><button onClick={() => remove(pkg)} className="text-red-600">Hapus</button></td></tr>)}{!packages.length && <tr><td colSpan="5" className="p-10 text-center text-gray-500">Belum ada paket ujian.</td></tr>}</tbody></table></div>
                 </div>
                 {editing && <div role="dialog" aria-modal="true" className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-gray-900/50"><form onSubmit={save} className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[92vh] overflow-y-auto p-6"><div className="flex justify-between items-center mb-5"><div><h3 className="text-xl font-bold">{viewOnly ? 'Lihat Paket Ujian' : editing.id && packages.some(p => p.id === editing.id) ? 'Edit Paket Ujian' : 'Buat Paket Ujian'}</h3><p className="text-sm text-gray-500 mt-1">Pilih soal langsung dari Bank Soal.</p></div><button type="button" onClick={close} className="text-2xl text-gray-400">×</button></div>
                     {error && <div role="alert" className="mb-4 p-3 rounded-lg bg-red-50 text-red-700">{error}</div>}
@@ -6141,11 +6352,11 @@ if ('serviceWorker' in navigator) {
             const [activeTab, setActiveTab] = React.useState('REKAP');
             const [feedback, setFeedback] = React.useState('');
             const filteredResults = React.useMemo(() => results.filter(result => {
-                const student = DEMO_DB.students.find(item => item.id === result.studentId);
+                const student = (DEMO_DB.students || []).find(item => String(item.id || item.studentId) === String(result.studentId || result.muridId));
                 const resultSchoolId = result.schoolId || result.sekolahId || student?.schoolId || student?.sekolahId;
-                const schedule = DEMO_DB.examSchedules.find(item => item.id === result.scheduleId);
-                const pkg = DEMO_DB.examPackages.find(item => item.id === (result.packageId || result.paketId || schedule?.packageId));
-                const subjectId = result.subjectId || result.mapelId || pkg?.subjectId;
+                const schedule = (DEMO_DB.examSchedules || []).find(item => String(item.id || item.scheduleId) === String(result.scheduleId || result.jadwalId));
+                const pkg = (DEMO_DB.examPackages || []).find(item => String(item.id) === String(result.packageId || result.paketId || schedule?.packageId || schedule?.examId));
+                const subjectId = result.subjectId || result.mapelId || schedule?.subjectId || schedule?.mapelId || pkg?.subjectId || pkg?.mapelId;
                 const schoolOk = isAdmin ? (!selectedSchools.length || selectedSchools.includes(String(resultSchoolId || ''))) : (!schoolId || String(resultSchoolId || '') === schoolId);
                 return schoolOk && (!selectedSubjects.length || selectedSubjects.includes(String(subjectId || '')));
             }), [results, schoolId, selectedSubjects]);
@@ -6166,8 +6377,9 @@ if ('serviceWorker' in navigator) {
                 setFeedback('Nilai berhasil dipublikasikan ke Dasbor Murid.');
             };
 
-            const avgScore = filteredResults.length > 0 ? (filteredResults.reduce((acc, curr) => acc + parseFloat(curr.percentage), 0) / filteredResults.length).toFixed(1) : 0;
-            const highest = filteredResults.length > 0 ? Math.max(...filteredResults.map(r => parseFloat(r.percentage))) : 0;
+            const scoredResults = filteredResults.filter(r => Number.isFinite(Number(r.percentage)) && String(r.percentage).trim() !== '');
+            const avgScore = scoredResults.length > 0 ? (scoredResults.reduce((acc, curr) => acc + Number(curr.percentage), 0) / scoredResults.length).toFixed(1) : '0.0';
+            const highest = scoredResults.length > 0 ? Math.max(...scoredResults.map(r => Number(r.percentage))).toFixed(1) : '0.0';
             const isPublished = filteredResults.some(r => r.status === 'PUBLISHED');
 
             return (
@@ -6189,7 +6401,7 @@ if ('serviceWorker' in navigator) {
                     <div className="grid grid-cols-3 gap-4">
                         <div className="bg-white p-5 rounded-xl border border-gray-200"><p className="text-sm text-gray-500">Rata-rata Kelas</p><p className="text-3xl font-bold text-gray-900">{avgScore} / 100</p></div>
                         <div className="bg-white p-5 rounded-xl border border-gray-200"><p className="text-sm text-gray-500">Tertinggi</p><p className="text-3xl font-bold text-teal-600">{highest} / 100</p></div>
-                        <div className="bg-white p-5 rounded-xl border border-gray-200"><p className="text-sm text-gray-500">Peserta Dinilai</p><p className="text-3xl font-bold text-gray-900">{filteredResults.length}</p></div>
+                        <div className="bg-white p-5 rounded-xl border border-gray-200"><p className="text-sm text-gray-500">Peserta Dinilai</p><p className="text-3xl font-bold text-gray-900">{scoredResults.length}</p></div>
                     </div>
 
                     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -6206,10 +6418,10 @@ if ('serviceWorker' in navigator) {
                                     <tbody className="divide-y text-sm">
                                         {filteredResults.length === 0 ? <tr><td colSpan="4" className="px-6 py-10 text-center text-gray-500">Tidak ada hasil sesuai filter.</td></tr> : filteredResults.map(r => (
                                             <tr key={r.id}>
-                                                <td className="px-6 py-4 font-medium">{r.studentName}</td>
-                                                <td className="px-6 py-4">{r.correctCount} B / {r.incorrectCount} S</td>
-                                                <td className="px-6 py-4 font-bold">{r.percentage}%</td>
-                                                <td className="px-6 py-4"><span className="px-2 py-1 bg-indigo-50 text-aksara-900 rounded font-bold">{r.grade}</span></td>
+                                                <td className="px-6 py-4 font-medium">{r.studentName || r.studentId || '-' }<span className="block text-xs text-gray-500">{r.nisn || ''}</span></td>
+                                                <td className="px-6 py-4">{Number(r.correctCount || 0)} B / {Number(r.incorrectCount || 0)} S</td>
+                                                <td className="px-6 py-4 font-bold">{Number.isFinite(Number(r.percentage)) ? `${Number(r.percentage).toFixed(2)}%` : 'Belum dinilai'}</td>
+                                                <td className="px-6 py-4"><span className="px-2 py-1 bg-indigo-50 text-aksara-900 rounded font-bold">{r.grade || (r.status === 'NEEDS_REVIEW' ? 'Perlu koreksi' : '-')}</span></td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -6269,13 +6481,14 @@ if ('serviceWorker' in navigator) {
         };
 
         const AdminDashboard = () => {
+            useAksaraDataRefresh();
             const { user, setRoute } = React.useContext(AppContext);
             const activeUsers = getActualActiveUserCount();
             const activeStudents = getRegisteredStudents().filter(item => String(item.status || 'ACTIVE').toUpperCase() === 'ACTIVE').length;
-            const activeSchools = DEMO_DB.schools.filter(item => item.status === 'ACTIVE').length;
+            const activeSchools = getRegisteredSchools().filter(item => !['INACTIVE','NONAKTIF','DISABLED','DELETED'].includes(String(item.status || 'ACTIVE').toUpperCase())).length;
             const shortcutItems = [
                 ['admin/users', 'user-cog', 'Data Pengguna', `${getActualActiveUserCount()} pengguna aktif`],
-                ['admin/schools', 'building', 'Data Sekolah', `${DEMO_DB.schools.length} sekolah`],
+                ['admin/schools', 'building', 'Data Sekolah', `${getRegisteredSchools().length} sekolah`],
                 ['admin/teachers', 'users', 'Data Guru', `${DEMO_DB.teachers.length} guru`],
                 ['admin/students', 'graduation-cap', 'Data Murid', `${getRegisteredStudents().length} murid`],
                 ['admin/parents', 'user-check', 'Orang Tua / Wali', `${DEMO_DB.parents.length} wali`],
@@ -6303,10 +6516,10 @@ if ('serviceWorker' in navigator) {
                     </section>
                     <section aria-labelledby="distribution-title" className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
                         <div className="flex items-center justify-between mb-4"><div><h3 id="distribution-title" className="font-heading font-bold text-gray-900">Distribusi Data Akademik</h3><p className="text-xs text-gray-500">Ringkasan data yang tersedia saat ini</p></div><span className="text-xs text-gray-500">Nilai</span></div>
-                        <div className="space-y-3">{[['Sekolah', DEMO_DB.schools.length, 'bg-aksara-600'], ['Guru', DEMO_DB.teachers.length, 'bg-teal-500'], ['Murid', getRegisteredStudents().length, 'bg-amber-500'], ['Soal', DEMO_DB.questions.length, 'bg-indigo-500']].map(([label, value, color]) => <div key={label} className="flex items-center gap-3"><span className="w-20 text-xs text-gray-600">{label}</span><div className="flex-1 h-3 rounded-full bg-gray-100 overflow-hidden"><div className={`h-full ${color} rounded-full`} style={{width: `${Math.min(100, value ? Math.max(8, value / Math.max(1, DEMO_DB.students.length, DEMO_DB.questions.length) * 100) : 0)}%`}}></div></div><span className="w-8 text-right text-sm font-semibold text-gray-900">{value || 0}</span></div>)}</div>
+                        <div className="space-y-3">{[['Sekolah', getRegisteredSchools().length, 'bg-aksara-600'], ['Guru', DEMO_DB.teachers.length, 'bg-teal-500'], ['Murid', getRegisteredStudents().length, 'bg-amber-500'], ['Soal', DEMO_DB.questions.length, 'bg-indigo-500']].map(([label, value, color]) => <div key={label} className="flex items-center gap-3"><span className="w-20 text-xs text-gray-600">{label}</span><div className="flex-1 h-3 rounded-full bg-gray-100 overflow-hidden"><div className={`h-full ${color} rounded-full`} style={{width: `${Math.min(100, value ? Math.max(8, value / Math.max(1, DEMO_DB.students.length, DEMO_DB.questions.length) * 100) : 0)}%`}}></div></div><span className="w-8 text-right text-sm font-semibold text-gray-900">{value || 0}</span></div>)}</div>
                     </section>
                     <div className="grid grid-cols-4 gap-4">
-                        <div className="bg-white p-5 rounded-xl border shadow-sm"><p className="text-gray-500 text-sm">Sekolah</p><p className="text-2xl font-bold">{DEMO_DB.schools.length}</p></div>
+                        <div className="bg-white p-5 rounded-xl border shadow-sm"><p className="text-gray-500 text-sm">Sekolah</p><p className="text-2xl font-bold">{getRegisteredSchools().length}</p></div>
                         <div className="bg-white p-5 rounded-xl border shadow-sm"><p className="text-gray-500 text-sm">Guru</p><p className="text-2xl font-bold">{DEMO_DB.teachers.length}</p></div>
                         <div className="bg-white p-5 rounded-xl border shadow-sm"><p className="text-gray-500 text-sm">Murid</p><p className="text-2xl font-bold">{getRegisteredStudents().length}</p></div>
                         <div className="bg-white p-5 rounded-xl border shadow-sm"><p className="text-gray-500 text-sm">Orang Tua</p><p className="text-2xl font-bold">{DEMO_DB.parents.length}</p></div>
@@ -6319,7 +6532,7 @@ if ('serviceWorker' in navigator) {
             const { user } = React.useContext(AppContext); const teacher = getTeacherForUser(user); const [form,setForm] = React.useState(teacher || {}); const [saving,setSaving] = React.useState(false); const [notice,setNotice] = React.useState('');
             React.useEffect(()=>setForm(getTeacherForUser(user) || {}),[user]);
             if (!teacher) return <div className="bg-white rounded-xl border p-8 text-center text-gray-500">Profil Guru belum tersedia untuk akun ini.</div>;
-            const save = async e => { e.preventDefault(); if (!form.name?.trim()) return setNotice('Nama wajib diisi.'); if (form.email && !/^\\S+@\\S+\\.\\S+$/.test(form.email)) return setNotice('Format email belum benar.'); setSaving(true); const before=getTeacherForUser(user); const updated=persistTeacherRecord({ ...before, name: form.name.trim().slice(0,120), email: String(form.email||'').trim().slice(0,160), phone: String(form.phone||'').trim().slice(0,40), district: String(form.district||'').trim().slice(0,80) }); addActivity(user,'UPDATE_TEACHER_PROFILE',`teacherId=${updated.teacherId}; fields=name,email,phone,district`); setForm(updated); setNotice('Profil berhasil diperbarui dan tersinkron ke Admin Super.'); setSaving(false); };
+            const save = async e => { e.preventDefault(); if (!form.name?.trim()) return setNotice('Nama wajib diisi.'); if (form.email && !/^\\S+@\\S+\\.\\S+$/.test(form.email)) return setNotice('Format email belum benar.'); setSaving(true); const before=getTeacherForUser(user); const updated=persistTeacherRecord({ ...before, name: form.name.trim().slice(0,120), email: String(form.email||'').trim().slice(0,160), phone: String(form.phone||'').trim().slice(0,40), district: String(form.district||'').trim().slice(0,80) }); syncTeacherClassAssignments(updated, before?.classIds || []); addActivity(user,'UPDATE_TEACHER_PROFILE',`teacherId=${updated.teacherId}; fields=name,email,phone,district`); setForm(updated); setNotice('Profil berhasil diperbarui dan tersinkron ke Admin Super.'); setSaving(false); };
             return <div className="max-w-2xl space-y-5"><div><h2 className="text-2xl font-heading font-bold">Profil Saya</h2><p className="text-sm text-gray-500">Perubahan tersimpan pada data Guru dengan ID yang sama.</p></div><form onSubmit={save} className="bg-white rounded-xl border p-6 space-y-4"><p className="text-xs text-gray-500">Teacher ID: <b>{teacher.teacherId || teacher.id}</b></p>{[['name','Nama Lengkap'],['email','Email'],['phone','Nomor Telepon'],['district','Kecamatan']].map(([key,label])=><label key={key} className="block text-sm font-medium">{label}<input value={form[key]||''} onChange={e=>setForm({...form,[key]:e.target.value})} className="mt-1 w-full border rounded-lg p-2.5" maxLength={160}/></label>)}{notice&&<p role="status" className="text-sm text-teal-700">{notice}</p>}<button disabled={saving} className="px-4 py-2 bg-aksara-600 text-white rounded-lg disabled:opacity-50">{saving?'Menyimpan...':'Simpan Profil'}</button></form></div>;
         };
         const GuruDashboard = () => { const { user,setRoute } = React.useContext(AppContext); const teacher=getTeacherForUser(user); const assigned=getTeacherAssignments(teacher,user); const subjects=DEMO_DB.subjects.filter(s=>DEMO_DB.questions.some(q=>q.subjectId===s.id)); return <div className="space-y-6"><AnnouncementsList/><div className="bg-white rounded-2xl p-6 shadow-sm border"><div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-2xl font-heading font-bold text-gray-900">Dashboard Guru</h2><p className="text-sm text-gray-600 mt-2">{teacher?.name||user?.name||'Belum diisi'} · {teacher?.email||'Email: Belum diisi'}</p><p className="text-sm text-gray-500 mt-1">Sekolah: {teacher?.schoolId ? (getSchoolName(teacher.schoolId)||teacher.schoolName||teacher.schoolId) : 'Belum diisi'} · Username: {teacher?.username||'Belum diisi'}</p></div><button onClick={()=>setRoute('guru/settings')} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Edit Profil</button></div></div><div className="grid grid-cols-1 md:grid-cols-3 gap-4">{[['Kelas Ditugaskan',assigned.classes.length],['Mata Pelajaran',subjects.length],['Murid Terdaftar',assigned.students.length]].map(([label,value])=><div key={label} className="bg-white p-5 rounded-xl border"><p className="text-sm text-gray-500">{label}</p><p className="text-3xl font-bold mt-2">{value}</p></div>)}</div><div className="flex flex-wrap gap-3"><button onClick={()=>setRoute('guru/classes')} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Kelas Saya</button><button onClick={()=>setRoute('guru/students')} className="px-4 py-2 border rounded-lg">Data Murid</button><button onClick={()=>setRoute('guru/schedules')} className="px-4 py-2 border rounded-lg">Jadwal Ujian</button><button onClick={()=>setRoute('guru/results')} className="px-4 py-2 border rounded-lg">Rekap Nilai</button></div></div>; };
@@ -6975,7 +7188,7 @@ if ('serviceWorker' in navigator) {
             const [query, setQuery] = React.useState('');
             const [role, setRole] = React.useState('');
             const [school, setSchool] = React.useState('');
-            const users = mergeCollectionRecords('users');
+            const users = getActualRegisteredUsers();
             const schools = getRegisteredSchools();
             const roleLabel = { ADMIN_SUPER: 'Admin Super', GURU: 'Guru', MURID: 'Murid', ORANG_TUA: 'Orang Tua / Wali' };
             const rows = users.filter(u => {
@@ -6988,9 +7201,10 @@ if ('serviceWorker' in navigator) {
             });
             return <div className="space-y-6 animate-in fade-in duration-500">
                 <div><h2 className="text-2xl font-heading font-bold text-gray-900">Data Pengguna</h2><p className="text-gray-500 text-sm">Seluruh akun yang sudah terdaftar pada sistem, terhubung dengan data Guru, Murid, dan Orang Tua/Wali.</p></div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Object.entries(roleLabel).map(([r,label]) => <div key={r} className="bg-white border rounded-xl p-4"><p className="text-xs text-gray-500">{label}</p><p className="text-2xl font-bold mt-1">{users.filter(u => u.role === r).length}</p></div>)}</div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3"><div className="bg-white border rounded-xl p-4"><p className="text-xs text-gray-500">Total Akun Terdaftar</p><p className="text-2xl font-bold mt-1">{users.length}</p></div><div className="bg-white border rounded-xl p-4"><p className="text-xs text-gray-500">Akun Aktif yang Dapat Digunakan</p><p className="text-2xl font-bold mt-1">{users.filter(aksaraAccountCanLogin).length}</p></div><div className="bg-white border rounded-xl p-4"><p className="text-xs text-gray-500">Akun Belum Siap Digunakan</p><p className="text-2xl font-bold mt-1">{users.filter(u => !aksaraAccountCanLogin(u)).length}</p></div></div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Object.entries(roleLabel).map(([r,label]) => <div key={r} className="bg-white border rounded-xl p-4"><p className="text-xs text-gray-500">{label}</p><p className="text-2xl font-bold mt-1">{users.filter(u => u.role === r).length}</p><p className="text-xs text-gray-500 mt-1">Dapat digunakan: {users.filter(u => u.role === r && aksaraAccountCanLogin(u)).length}</p></div>)}</div>
                 <div className="bg-white rounded-xl border overflow-hidden"><div className="p-4 bg-gray-50 border-b flex flex-wrap gap-3"><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Cari nama, username, email..." className="flex-1 min-w-56 border rounded-lg p-2.5"/><select value={role} onChange={e=>setRole(e.target.value)} className="border rounded-lg p-2.5"><option value="">Semua Peran</option>{Object.entries(roleLabel).map(([r,label])=><option key={r} value={r}>{label}</option>)}</select><select value={school} onChange={e=>setSchool(e.target.value)} className="border rounded-lg p-2.5 min-w-56"><option value="">Semua Sekolah</option>{schools.map(sc=><option key={sc.id} value={sc.id}>{sc.name}</option>)}</select><button onClick={()=>{setQuery('');setRole('');setSchool('')}} className="px-3 py-2 border rounded-lg">Reset</button></div>
-                <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr className="bg-gray-50 border-b text-xs uppercase text-gray-500"><th className="p-4">No</th><th className="p-4">Nama</th><th className="p-4">Username</th><th className="p-4">Peran</th><th className="p-4">Sekolah</th><th className="p-4">Status</th></tr></thead><tbody className="divide-y text-sm">{rows.map((u,i)=>{ const teacher=DEMO_DB.teachers.find(t=>String(t.userId||'')===String(u.id||'')||String(t.id||'')===String(u.teacherId||'')); const student=DEMO_DB.students.find(st=>String(st.userId||'')===String(u.id||'')||String(st.id||'')===String(u.studentId||'')); const parent=DEMO_DB.parents.find(pa=>String(pa.userId||'')===String(u.id||'')||String(pa.id||'')===String(u.parentId||'')); const sid=u.schoolId||teacher?.schoolId||student?.schoolId||parent?.schoolId||''; return <tr key={u.id||u.username}><td className="p-4">{i+1}</td><td className="p-4 font-semibold">{u.name||'-'}</td><td className="p-4 font-mono">{u.username||u.email||'-'}</td><td className="p-4">{roleLabel[u.role]||u.role||'-'}</td><td className="p-4">{getSchoolName(sid)||'-'}</td><td className="p-4"><Badge status={u.status}/></td></tr>})}{!rows.length&&<tr><td colSpan="6" className="p-10 text-center text-gray-500">Belum ada pengguna yang sesuai.</td></tr>}</tbody></table></div></div></div>;
+                <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr className="bg-gray-50 border-b text-xs uppercase text-gray-500"><th className="p-4">No</th><th className="p-4">Nama</th><th className="p-4">Username</th><th className="p-4">Peran</th><th className="p-4">Sekolah</th><th className="p-4">Status</th><th className="p-4">Kelayakan Login</th></tr></thead><tbody className="divide-y text-sm">{rows.map((u,i)=>{ const teacher=DEMO_DB.teachers.find(t=>String(t.userId||'')===String(u.id||'')||String(t.id||'')===String(u.teacherId||'')); const student=DEMO_DB.students.find(st=>String(st.userId||'')===String(u.id||'')||String(st.id||'')===String(u.studentId||'')); const parent=DEMO_DB.parents.find(pa=>String(pa.userId||'')===String(u.id||'')||String(pa.id||'')===String(u.parentId||'')); const sid=u.schoolId||teacher?.schoolId||student?.schoolId||parent?.schoolId||''; return <tr key={u.id||u.username}><td className="p-4">{i+1}</td><td className="p-4 font-semibold">{u.name||'-'}</td><td className="p-4 font-mono">{u.username||u.email||'-'}</td><td className="p-4">{roleLabel[u.role]||u.role||'-'}</td><td className="p-4">{getSchoolName(sid)||'-'}</td><td className="p-4"><Badge status={u.status}/></td><td className="p-4">{aksaraAccountCanLogin(u) ? <span className="text-teal-700 font-medium">Dapat digunakan</span> : <span className="text-amber-700 font-medium">Perlu dilengkapi</span>}</td></tr>})}{!rows.length&&<tr><td colSpan="7" className="p-10 text-center text-gray-500">Belum ada pengguna yang sesuai.</td></tr>}</tbody></table></div></div></div>;
         };
 
         const AdminRouter = ({ route }) => {
@@ -7215,7 +7429,7 @@ if ('serviceWorker' in navigator) {
             const students=allStudents.filter(s=>(!classId||String(s.classId||s.kelasId||'')===classId)&&(!query||`${s.name||''} ${s.nisn||''} ${s.username||''}`.toLowerCase().includes(query.toLowerCase()))).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
             const openNew=()=>{setEditingId(null);setError('');setForm({name:'',nisn:'',schoolId,classId:classId||String(assigned.classes?.[0]?.id||''),username:'',password:'',parentName:'',status:'ACTIVE'});setModal('form')};
             const openEdit=s=>{setEditingId(s.id);setError('');setForm({name:s.name||'',nisn:s.nisn||s.nis||'',schoolId:s.schoolId||schoolId,classId:s.classId||s.kelasId||'',username:s.username||'',password:s.password||'',parentName:s.parentName||'',status:s.status||'ACTIVE'});setModal('form')};
-            const save=async e=>{e.preventDefault();setError('');const name=form.name.trim(),nisn=String(form.nisn||'').trim(),sid=String(form.schoolId||schoolId).trim(),cid=String(form.classId||'').trim();if(!name||!nisn)return setError('Nama dan NISN wajib diisi.');if(sid!==schoolId)return setError('Guru hanya dapat mengelola murid pada sekolahnya sendiri.');if(!cid||!assignedClassIds.has(cid))return setError('Kelas harus merupakan kelas yang ditugaskan kepada akun Guru.');if(allStudents.some(s=>s.id!==editingId&&String(s.nisn||'').trim()===nisn))return setError('NISN sudah digunakan pada sekolah ini.');const old=allStudents.find(s=>s.id===editingId)||{};const student={...old,id:editingId||`STD-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,userId:old.userId||`USR-STU-${Date.now()}`,studentId:old.studentId||editingId||`STD-${Date.now()}`,name,nisn,schoolId:sid,schoolName:getSchoolName(sid),classId:cid,className:(assigned.classes||[]).find(c=>String(c.id)===cid)?.name||cid,parentName:String(form.parentName||'').trim(),username:String(form.username||nisn).trim(),password:String(form.password||nisn),status:form.status||'ACTIVE',updatedBy:user?.id,updatedByRole:'GURU',updatedAt:new Date().toISOString()};const current=mergeCollectionRecords('students');const next=editingId?current.map(s=>s.id===editingId?student:s):[...current,student];DEMO_DB.students=next;persistDurableCollection('students',next);try{await aksaraFbPersistCollection('students',next);if(typeof upsertStudentAccount==='function')await upsertStudentAccount(student);}catch(err){console.warn('[AKSARA] sinkron murid guru',err)};window.dispatchEvent(new Event('aksara:students-changed'));setModal(null);setNotice(editingId?'Data murid diperbarui dan disinkronkan ke Admin Super.':'Murid ditambahkan dan langsung tersedia pada Data Admin Super.');setTimeout(()=>setNotice(''),3500)};
+            const save=async e=>{e.preventDefault();setError('');const name=form.name.trim(),nisn=String(form.nisn||'').trim(),sid=String(form.schoolId||schoolId).trim(),cid=String(form.classId||'').trim();if(!name||!nisn)return setError('Nama dan NISN wajib diisi.');if(sid!==schoolId)return setError('Guru hanya dapat mengelola murid pada sekolahnya sendiri.');if(!cid||!assignedClassIds.has(cid))return setError('Kelas harus merupakan kelas yang ditugaskan kepada akun Guru.');if(allStudents.some(s=>s.id!==editingId&&String(s.nisn||'').trim()===nisn))return setError('NISN sudah digunakan pada sekolah ini.');const old=allStudents.find(s=>s.id===editingId)||{};const student={...old,id:editingId||`STD-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,userId:old.userId||`USR-STU-${Date.now()}`,studentId:old.studentId||editingId||`STD-${Date.now()}`,name,nisn,schoolId:sid,schoolName:getSchoolName(sid),classId:cid,className:(assigned.classes||[]).find(c=>String(c.id)===cid)?.name||cid,parentName:String(form.parentName||'').trim(),username:String(form.username||nisn).trim(),password:String(form.password||nisn),status:form.status||'ACTIVE',updatedBy:user?.id,updatedByRole:'GURU',updatedAt:new Date().toISOString()};ensureSchoolClassRecords(sid,[cid],teacher?.teacherId||teacher?.id||user?.teacherId||user?.id||'');const current=mergeCollectionRecords('students');const next=editingId?current.map(s=>s.id===editingId?student:s):[...current,student];DEMO_DB.students=next;persistDurableCollection('students',next);try{await aksaraFbPersistCollection('students',next);if(typeof upsertStudentAccount==='function')await upsertStudentAccount(student);}catch(err){console.warn('[AKSARA] sinkron murid guru',err)};window.dispatchEvent(new Event('aksara:students-changed'));setModal(null);setNotice(editingId?'Data murid diperbarui dan disinkronkan ke Admin Super.':'Murid ditambahkan dan langsung tersedia pada Data Admin Super.');setTimeout(()=>setNotice(''),3500)};
             const normalizeJsonRecord=r=>{const nisn=String(r.nisn??r.NISN??'').trim();const name=String(r.name??r.nama??r.namaMurid??'').trim();const rawClass=String(r.classId??r.kelasId??r.className??r.kelas??'').trim();const matchedClass=(assigned.classes||[]).find(c=>String(c.id||'').trim()===rawClass||String(c.name||c.className||c.kelas||'').trim().toLowerCase()===rawClass.toLowerCase());const cid=matchedClass?String(matchedClass.id):rawClass;return {name,nisn,classId:cid,username:String(r.username??nisn).trim(),password:String(r.password??nisn),parentName:String(r.parentName??r.namaWali??r.wali??'').trim(),status:String(r.status??'ACTIVE').toUpperCase()==='INACTIVE'?'INACTIVE':'ACTIVE'};};
             const validateJson=()=>{setJsonErrors([]);setJsonPreview([]);try{const payload=JSON.parse(jsonText);const records=Array.isArray(payload)?payload:(Array.isArray(payload.records)?payload.records:null);if(!records)throw new Error('JSON harus berupa array atau objek {"schemaVersion":"1.0","entity":"students","records":[...]}');const rows=records.map(normalizeJsonRecord);const errs=[];const seen=new Set();rows.forEach((r,i)=>{if(!r.name)errs.push(`Baris ${i+1}: nama wajib diisi`);if(!r.nisn)errs.push(`Baris ${i+1}: NISN wajib diisi`);if(!r.classId||!assignedClassIds.has(r.classId))errs.push(`Baris ${i+1}: classId ${r.classId||'(kosong)'} bukan kelas yang ditugaskan`);if(seen.has(r.nisn)||allStudents.some(s=>String(s.nisn||'')===r.nisn))errs.push(`Baris ${i+1}: NISN ${r.nisn} sudah ada/duplikat`);seen.add(r.nisn)});setJsonPreview(rows);setJsonErrors(errs);if(!errs.length)setNotice(`${rows.length} data JSON siap disinkronkan.`)}catch(err){setJsonErrors([`JSON tidak valid: ${err.message}`])}};
             const applyJson=async()=>{if(jsonErrors.length||!jsonPreview.length)return;let current=mergeCollectionRecords('students');const now=new Date().toISOString();const incoming=jsonPreview.map(r=>({...r,id:`STD-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,studentId:'',userId:'',schoolId,schoolName:getSchoolName(schoolId),className:(assigned.classes||[]).find(c=>String(c.id)===r.classId)?.name||r.classId,updatedBy:user?.id,updatedByRole:'GURU',createdAt:now,updatedAt:now}));const final=jsonMode==='replace'?[...current.filter(s=>String(s.schoolId)!==schoolId||!assignedClassIds.has(String(s.classId||''))),...incoming]:[...current,...incoming];const fixed=final.map(s=>s.studentId?s:{...s,studentId:s.id});DEMO_DB.students=fixed;persistDurableCollection('students',fixed);try{await aksaraFbPersistCollection('students',fixed);for(const st of incoming){if(typeof upsertStudentAccount==='function')await upsertStudentAccount({...st,studentId:st.studentId||st.id})}}catch(err){console.warn('[AKSARA] sinkron JSON murid guru',err)}window.dispatchEvent(new Event('aksara:students-changed'));setJsonText('');setJsonPreview([]);setJsonErrors([]);setModal(null);setNotice(`${incoming.length} murid dari JSON berhasil disinkronkan ke Firebase dan Data Admin Super.`);setTimeout(()=>setNotice(''),4000)};
@@ -7237,7 +7451,7 @@ if ('serviceWorker' in navigator) {
         const getLocalCalendarDate = (schedule = {}) => { const value = schedule.date || schedule.startTime || schedule.start_time; if (!value) return ''; const timezone = schedule.timezone || 'Asia/Jakarta'; try { const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(value)).reduce((out, part) => { if (part.type !== 'literal') out[part.type] = part.value; return out; }, {}); return parts.year && parts.month && parts.day ? `${parts.year}-${parts.month}-${parts.day}` : String(value).slice(0, 10); } catch (e) { return String(value).slice(0, 10); } };
         const getStableExamKey = schedule => String(schedule.examId || schedule.packageId || schedule.questionSetId || schedule.question_set_id || `schedule:${schedule.scheduleId || schedule.id || 'unknown'}`);
         const dedupeStudentSchedules = (records = []) => { const grouped = new Map(); records.forEach(record => { const key = `${String(record.schoolId || '')}|${getStableExamKey(record)}|${getLocalCalendarDate(record)}`; const current = grouped.get(key); if (!current) return grouped.set(key, { ...record, duplicateCount: 1 }); const currentRank = ['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(String(current.status || '').toUpperCase()) ? 1 : 0; const nextRank = ['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(String(record.status || '').toUpperCase()) ? 1 : 0; const currentUpdated = new Date(current.updatedAt || current.updated_at || current.createdAt || 0).getTime() || 0; const nextUpdated = new Date(record.updatedAt || record.updated_at || record.createdAt || 0).getTime() || 0; const preferred = nextRank > currentRank || (nextRank === currentRank && nextUpdated > currentUpdated) ? record : current; grouped.set(key, { ...current, ...preferred, name: preferred.name || current.name, packageName: preferred.packageName || current.packageName, duplicateCount: (current.duplicateCount || 1) + 1 }); }); return [...grouped.values()]; };
-        const MuridDashboard = () => { const {user}=React.useContext(AppContext); const [stage,setStage]=React.useState('home'); const [selected,setSelected]=React.useState(null); const [token,setToken]=React.useState(''); const [error,setError]=React.useState(''); const [refreshing,setRefreshing]=React.useState(false); const [profileVersion,setProfileVersion]=React.useState(0); const [profileSyncError,setProfileSyncError]=React.useState(''); const student=getStudentProfile(user); const stableSchedulePredicate = React.useCallback(() => true, []); const scheduleSource=usePersistentSchedules(stableSchedulePredicate).items; React.useEffect(()=>{const refresh=()=>{try{readPersistentStudents();setProfileSyncError('')}catch(e){setProfileSyncError('Profil gagal disegarkan. Coba lagi.')}setProfileVersion(v=>v+1)}; window.addEventListener('focus',refresh); window.addEventListener('aksara:schedules-changed',refresh); return()=>{window.removeEventListener('focus',refresh);window.removeEventListener('aksara:schedules-changed',refresh)}},[user?.id]); const schedules=dedupeStudentSchedules(scheduleSource.filter(s=>{const participant=(DEMO_DB.examParticipants||[]).find(p=>p.scheduleId===s.id&&p.studentId===student?.id);const targets=(s.targetClassIds||s.classIds||(s.classId?[s.classId]:[])).map(String);const classAllowed=s.targetScope==='all'||(!s.targetScope&&(!targets.length||targets.includes(String(student?.classId))))||targets.includes(String(student?.classId));const status=String(s.status||s.publishStatus||'').toUpperCase();const active=['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(status);return !!student&&student.status==='ACTIVE'&&!!student.schoolId&&!!student.classId&&String(s.schoolId||'')===String(student.schoolId||'')&&classAllowed&&(active||participant);}).map(s=>({...s,package:DEMO_DB.examPackages.find(p=>p.id===s.packageId),participant:DEMO_DB.examParticipants.find(p=>p.scheduleId===s.id&&p.studentId===student?.id),result:DEMO_DB.examResults.find(r=>r.scheduleId===s.id&&r.studentId===student?.id)}))).sort((a,b)=>new Date(a.startTime||0)-new Date(b.startTime||0)); const results=(DEMO_DB.examResults||[]).filter(r=>String(r.studentId)===String(student?.id)).map(r=>({...r,schedule:DEMO_DB.examSchedules.find(s=>s.id===r.scheduleId),package:DEMO_DB.examPackages.find(p=>p.id===DEMO_DB.examSchedules.find(s=>s.id===r.scheduleId)?.packageId)})).sort((a,b)=>new Date(b.submittedAt||b.publishedAt||0)-new Date(a.submittedAt||a.publishedAt||0)); const begin=s=>{setSelected(s);setStage('detail');setError('');}; const validateToken=()=>{const s=selected;const targets=(s?.targetClassIds||s?.classIds||(s?.classId?[s.classId]:[])).map(String);const classAllowed=s?.targetScope==='all'||!targets.length||targets.includes(String(student?.classId||''));const status=['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(String(s?.status||s?.publishStatus||'').toUpperCase());const ok=s&&status&&classAllowed&&(String(s.schoolScope||'').toLowerCase()==='all'||String(s.schoolId||'').toUpperCase()==='ALL'||String(s.schoolId||'')===String(student?.schoolId||''))&&String(s.token||'').toUpperCase()===token.trim().toUpperCase();if(!ok)return setError('TOKEN salah, jadwal belum dibuka, atau tidak berlaku untuk akun ini.');setStage('exam');}; const refresh=()=>{setRefreshing(true);setTimeout(()=>setRefreshing(false),350);}; if(stage==='exam')return <ExamRoom scheduleId={selected.id}/>; const initials=(student?.name||user?.name||'?').split(' ').map(x=>x[0]).slice(0,2).join('').toUpperCase(); return <div className="space-y-6">{(profileSyncError||relationMessage(student))&&<div role="alert" className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4"><p className="font-semibold">Profil belum terhubung</p><p className="text-sm mt-1">{profileSyncError||relationMessage(student)}</p><button type="button" onClick={()=>{readPersistentStudents();setProfileVersion(v=>v+1)}} className="mt-3 px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-sm font-medium">Segarkan Profil</button></div>}<section className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 md:p-8"><div className="flex flex-col md:flex-row md:items-center gap-6"><div className="w-20 h-20 rounded-2xl bg-aksara-900 text-white flex items-center justify-center text-2xl font-bold shadow-lg">{initials}</div><div className="flex-1"><p className="text-xs uppercase tracking-[.2em] text-amber-600 font-bold">Profil Murid</p><h1 className="text-3xl font-heading font-bold text-gray-900 mt-1">{student?.name||user?.name||'Belum tersedia'}</h1><p className="text-gray-500 mt-2">{student?.nisn||'Belum tersedia'} · {user?.username||'Identitas akun belum tersedia'}</p><p className="text-sm text-gray-600 mt-1">{DEMO_DB.schools.find(s=>s.id===student?.schoolId)?.name||'Sekolah belum tersedia'} · {DEMO_DB.classes.find(c=>c.id===student?.classId)?.name||'Kelas belum tersedia'}</p></div><span className="px-3 py-1.5 rounded-full bg-teal-50 text-teal-700 text-sm font-semibold">{student?.status==='ACTIVE'?'Akun aktif':'Status belum tersedia'}</span></div><div className="grid grid-cols-2 gap-3 mt-6"><div className="bg-gray-50 rounded-xl p-4"><p className="text-xs text-gray-500">Ujian terjadwal</p><p className="text-2xl font-bold text-gray-900">{schedules.length}</p></div><div className="bg-gray-50 rounded-xl p-4"><p className="text-xs text-gray-500">Hasil tersedia</p><p className="text-2xl font-bold text-gray-900">{results.length}</p></div></div></section><div className="flex flex-wrap gap-2"><button onClick={()=>setStage('home')} className={`px-4 py-2 rounded-lg ${stage==='home'?'bg-aksara-900 text-white':'bg-white border'}`}>Riwayat Ujian</button><button onClick={()=>setStage('results')} className={`px-4 py-2 rounded-lg ${stage==='results'?'bg-aksara-900 text-white':'bg-white border'}`}>Hasil Ujian</button><button onClick={refresh} className="px-4 py-2 bg-white border rounded-lg">{refreshing?'Memuat...':'Refresh'}</button></div>{stage==='results'?<section className="bg-white rounded-xl border overflow-hidden"><div className="p-5 border-b"><h2 className="text-xl font-bold">Hasil Ujian</h2></div>{results.length?results.map(r=><div key={r.id} className="p-5 border-b last:border-0"><div className="flex justify-between gap-3"><div><h3 className="font-semibold">{r.schedule?.name||'Ujian belum tersedia'}</h3><p className="text-sm text-gray-500">{r.package?.name||'Mata pelajaran belum tersedia'} · {r.status==='PUBLISHED'?'Dirilis':'Belum dirilis'}</p></div><b className="text-xl">{r.status==='PUBLISHED'?`${r.percentage}%`:'Belum tersedia'}</b></div></div>):<div className="p-10 text-center text-gray-500">Belum ada hasil ujian yang tersedia.</div>}</section>:<section><h2 className="text-xl font-bold text-gray-900 mb-3">Riwayat Ujian</h2>{schedules.length?schedules.map(s=><article key={s.id} className="bg-white border rounded-xl p-5 mb-3 flex flex-col md:flex-row md:items-center justify-between gap-4"><div><h3 className="font-bold text-gray-900">{s.name}</h3><p className="text-sm text-gray-500">{s.package?.name||'Mata pelajaran belum tersedia'} · {s.startTime?new Date(s.startTime).toLocaleString('id-ID'):'Waktu belum tersedia'}</p><p className="text-xs mt-2 text-gray-500">Status: {s.participant?.status||'Belum diikuti'}</p></div><button onClick={()=>begin(s)} disabled={!['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(String(s.status||s.publishStatus||'').toUpperCase())} className="px-4 py-2 bg-aksara-600 text-white rounded-lg disabled:opacity-50">{s.participant?.status==='SUBMITTED'?'Lihat Detail':'Mulai Bertahap'}</button></article>):<div className="bg-white border rounded-xl p-10 text-center text-gray-500">Belum ada jadwal ujian untuk sekolah dan kelas Anda.</div>}</section>}{stage==='detail'&&selected&&<div className="fixed inset-0 z-[999] bg-gray-900/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-lg"><p className="text-xs uppercase tracking-widest text-amber-600 font-bold">Detail Ujian → Biodata → Persetujuan → Token</p><h2 className="text-2xl font-bold mt-2">{selected.name}</h2><p className="text-gray-500 mt-2">{selected.package?.name||'Mata pelajaran belum tersedia'}</p><div className="flex justify-end gap-3 mt-6"><button onClick={()=>setStage('home')} className="px-4 py-2 bg-gray-100 rounded-lg">Kembali</button><button onClick={()=>setStage('consent')} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Lanjutkan</button></div></div></div>}{stage==='consent'&&selected&&<div className="fixed inset-0 z-[999] bg-gray-900/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-lg"><h2 className="text-xl font-bold">Persetujuan Memulai Ujian</h2><p className="text-sm text-gray-600 mt-3">Nama: {student?.name||'Belum tersedia'} · NISN: {student?.nisn||'Belum tersedia'}</p><label className="flex gap-2 mt-5 text-sm"><input type="checkbox" id="murid-consent"/> Saya menyetujui aturan ujian dan data saya sesuai.</label>{error&&<p className="text-sm text-red-600 mt-3">{error}</p>}<div className="flex justify-end gap-3 mt-6"><button onClick={()=>setStage('detail')} className="px-4 py-2 bg-gray-100 rounded-lg">Kembali</button><button onClick={()=>document.getElementById('murid-consent')?.checked?setStage('token'):setError('Persetujuan wajib dipilih.')} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Setuju dan Lanjut</button></div></div></div>}{stage==='token'&&selected&&<div className="fixed inset-0 z-[999] bg-gray-900/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-lg"><h2 className="text-xl font-bold">Masukkan TOKEN</h2><p className="text-sm text-gray-500 mt-2">TOKEN hanya diverifikasi untuk ujian dan akun murid ini.</p><input value={token} onChange={e=>{setToken(e.target.value);setError('')}} className="w-full border rounded-lg p-3 mt-5" placeholder="AKS-XXXXXX"/>{error&&<p className="text-sm text-red-600 mt-2">{error}</p>}<div className="flex justify-end gap-3 mt-6"><button onClick={()=>setStage('consent')} className="px-4 py-2 bg-gray-100 rounded-lg">Kembali</button><button onClick={validateToken} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Verifikasi dan Mulai</button></div></div></div>}</div>; };
+        const MuridDashboard = () => { const {user}=React.useContext(AppContext); const [stage,setStage]=React.useState('home'); const [selected,setSelected]=React.useState(null); const [token,setToken]=React.useState(''); const [error,setError]=React.useState(''); const [refreshing,setRefreshing]=React.useState(false); const [profileVersion,setProfileVersion]=React.useState(0); const [profileSyncError,setProfileSyncError]=React.useState(''); const student=getStudentProfile(user); const stableSchedulePredicate = React.useCallback(() => true, []); const scheduleSource=usePersistentSchedules(stableSchedulePredicate).items; React.useEffect(()=>{const refresh=()=>{try{readPersistentStudents();setProfileSyncError('')}catch(e){setProfileSyncError('Profil gagal disegarkan. Coba lagi.')}setProfileVersion(v=>v+1)}; window.addEventListener('focus',refresh); window.addEventListener('aksara:schedules-changed',refresh); return()=>{window.removeEventListener('focus',refresh);window.removeEventListener('aksara:schedules-changed',refresh)}},[user?.id]); const schedules=dedupeStudentSchedules(scheduleSource.filter(s=>{const participant=(DEMO_DB.examParticipants||[]).find(p=>p.scheduleId===s.id&&p.studentId===student?.id);const targets=(s.targetClassIds||s.classIds||(s.classId?[s.classId]:[])).map(String);const classAllowed=s.targetScope==='all'||(!s.targetScope&&(!targets.length||targets.includes(String(student?.classId))))||targets.includes(String(student?.classId));const status=String(s.status||s.publishStatus||'').toUpperCase();const active=['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(status);return !!student&&student.status==='ACTIVE'&&!!student.schoolId&&!!student.classId&&String(s.schoolId||'')===String(student.schoolId||'')&&classAllowed&&(active||participant);}).map(s=>({...s,package:DEMO_DB.examPackages.find(p=>p.id===s.packageId),participant:DEMO_DB.examParticipants.find(p=>p.scheduleId===s.id&&p.studentId===student?.id),result:DEMO_DB.examResults.find(r=>r.scheduleId===s.id&&r.studentId===student?.id)}))).sort((a,b)=>new Date(a.startTime||0)-new Date(b.startTime||0)); const results=(DEMO_DB.examResults||[]).filter(r=>String(r.studentId)===String(student?.id)).map(r=>({...r,schedule:DEMO_DB.examSchedules.find(s=>s.id===r.scheduleId),package:DEMO_DB.examPackages.find(p=>p.id===DEMO_DB.examSchedules.find(s=>s.id===r.scheduleId)?.packageId)})).sort((a,b)=>new Date(b.submittedAt||b.publishedAt||0)-new Date(a.submittedAt||a.publishedAt||0)); const begin=s=>{setSelected(s);setStage('detail');setError('');}; const validateToken=()=>{const s=selected;const targets=(s?.targetClassIds||s?.classIds||(s?.classId?[s.classId]:[])).map(String);const classAllowed=s?.targetScope==='all'||!targets.length||targets.includes(String(student?.classId||''));const status=['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(String(s?.status||s?.publishStatus||'').toUpperCase());const ok=s&&status&&classAllowed&&(String(s.schoolScope||'').toLowerCase()==='all'||String(s.schoolId||'').toUpperCase()==='ALL'||String(s.schoolId||'')===String(student?.schoolId||''))&&String(s.token||'').toUpperCase()===token.trim().toUpperCase();if(!ok)return setError('TOKEN salah, jadwal belum dibuka, atau tidak berlaku untuk akun ini.');setStage('exam');}; const refresh=()=>{setRefreshing(true);setTimeout(()=>setRefreshing(false),350);}; if(stage==='exam')return <ExamRoom scheduleId={selected.id}/>; const initials=(student?.name||user?.name||'?').split(' ').map(x=>x[0]).slice(0,2).join('').toUpperCase(); return <div className="space-y-6">{(profileSyncError||relationMessage(student))&&<div role="alert" className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4"><p className="font-semibold">Profil belum terhubung</p><p className="text-sm mt-1">{profileSyncError||relationMessage(student)}</p><button type="button" onClick={()=>{readPersistentStudents();setProfileVersion(v=>v+1)}} className="mt-3 px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-sm font-medium">Segarkan Profil</button></div>}<section className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 md:p-8"><div className="flex flex-col md:flex-row md:items-center gap-6"><div className="w-20 h-20 rounded-2xl bg-aksara-900 text-white flex items-center justify-center text-2xl font-bold shadow-lg">{initials}</div><div className="flex-1"><p className="text-xs uppercase tracking-[.2em] text-amber-600 font-bold">Profil Murid</p><h1 className="text-3xl font-heading font-bold text-gray-900 mt-1">{student?.name||user?.name||'Belum tersedia'}</h1><p className="text-gray-500 mt-2">{student?.nisn||'Belum tersedia'} · {user?.username||'Identitas akun belum tersedia'}</p><p className="text-sm text-gray-600 mt-1">{student?.schoolName||getSchoolName(student?.schoolId)||'Sekolah belum tersedia'} · {student?.className||studentClassLabel(student?.classId)||'Kelas belum tersedia'}</p></div><span className="px-3 py-1.5 rounded-full bg-teal-50 text-teal-700 text-sm font-semibold">{student?.status==='ACTIVE'?'Akun aktif':'Status belum tersedia'}</span></div><div className="grid grid-cols-2 gap-3 mt-6"><div className="bg-gray-50 rounded-xl p-4"><p className="text-xs text-gray-500">Ujian terjadwal</p><p className="text-2xl font-bold text-gray-900">{schedules.length}</p></div><div className="bg-gray-50 rounded-xl p-4"><p className="text-xs text-gray-500">Hasil tersedia</p><p className="text-2xl font-bold text-gray-900">{results.length}</p></div></div></section><div className="flex flex-wrap gap-2"><button onClick={()=>setStage('home')} className={`px-4 py-2 rounded-lg ${stage==='home'?'bg-aksara-900 text-white':'bg-white border'}`}>Riwayat Ujian</button><button onClick={()=>setStage('results')} className={`px-4 py-2 rounded-lg ${stage==='results'?'bg-aksara-900 text-white':'bg-white border'}`}>Hasil Ujian</button><button onClick={refresh} className="px-4 py-2 bg-white border rounded-lg">{refreshing?'Memuat...':'Refresh'}</button></div>{stage==='results'?<section className="bg-white rounded-xl border overflow-hidden"><div className="p-5 border-b"><h2 className="text-xl font-bold">Hasil Ujian</h2></div>{results.length?results.map(r=><div key={r.id} className="p-5 border-b last:border-0"><div className="flex justify-between gap-3"><div><h3 className="font-semibold">{r.schedule?.name||'Ujian belum tersedia'}</h3><p className="text-sm text-gray-500">{r.package?.name||'Mata pelajaran belum tersedia'} · {r.status==='PUBLISHED'?'Dirilis':'Belum dirilis'}</p></div><b className="text-xl">{r.status==='PUBLISHED'?`${r.percentage}%`:'Belum tersedia'}</b></div></div>):<div className="p-10 text-center text-gray-500">Belum ada hasil ujian yang tersedia.</div>}</section>:<section><h2 className="text-xl font-bold text-gray-900 mb-3">Riwayat Ujian</h2>{schedules.length?schedules.map(s=><article key={s.id} className="bg-white border rounded-xl p-5 mb-3 flex flex-col md:flex-row md:items-center justify-between gap-4"><div><h3 className="font-bold text-gray-900">{s.name}</h3><p className="text-sm text-gray-500">{s.package?.name||'Mata pelajaran belum tersedia'} · {s.startTime?new Date(s.startTime).toLocaleString('id-ID'):'Waktu belum tersedia'}</p><p className="text-xs mt-2 text-gray-500">Status: {s.participant?.status||'Belum diikuti'}</p></div><button onClick={()=>begin(s)} disabled={!['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(String(s.status||s.publishStatus||'').toUpperCase())} className="px-4 py-2 bg-aksara-600 text-white rounded-lg disabled:opacity-50">{s.participant?.status==='SUBMITTED'?'Lihat Detail':'Mulai Bertahap'}</button></article>):<div className="bg-white border rounded-xl p-10 text-center text-gray-500">Belum ada jadwal ujian untuk sekolah dan kelas Anda.</div>}</section>}{stage==='detail'&&selected&&<div className="fixed inset-0 z-[999] bg-gray-900/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-lg"><p className="text-xs uppercase tracking-widest text-amber-600 font-bold">Detail Ujian → Biodata → Persetujuan → Token</p><h2 className="text-2xl font-bold mt-2">{selected.name}</h2><p className="text-gray-500 mt-2">{selected.package?.name||'Mata pelajaran belum tersedia'}</p><div className="flex justify-end gap-3 mt-6"><button onClick={()=>setStage('home')} className="px-4 py-2 bg-gray-100 rounded-lg">Kembali</button><button onClick={()=>setStage('consent')} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Lanjutkan</button></div></div></div>}{stage==='consent'&&selected&&<div className="fixed inset-0 z-[999] bg-gray-900/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-lg"><h2 className="text-xl font-bold">Persetujuan Memulai Ujian</h2><p className="text-sm text-gray-600 mt-3">Nama: {student?.name||'Belum tersedia'} · NISN: {student?.nisn||'Belum tersedia'}</p><label className="flex gap-2 mt-5 text-sm"><input type="checkbox" id="murid-consent"/> Saya menyetujui aturan ujian dan data saya sesuai.</label>{error&&<p className="text-sm text-red-600 mt-3">{error}</p>}<div className="flex justify-end gap-3 mt-6"><button onClick={()=>setStage('detail')} className="px-4 py-2 bg-gray-100 rounded-lg">Kembali</button><button onClick={()=>document.getElementById('murid-consent')?.checked?setStage('token'):setError('Persetujuan wajib dipilih.')} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Setuju dan Lanjut</button></div></div></div>}{stage==='token'&&selected&&<div className="fixed inset-0 z-[999] bg-gray-900/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-lg"><h2 className="text-xl font-bold">Masukkan TOKEN</h2><p className="text-sm text-gray-500 mt-2">TOKEN hanya diverifikasi untuk ujian dan akun murid ini.</p><input value={token} onChange={e=>{setToken(e.target.value);setError('')}} className="w-full border rounded-lg p-3 mt-5" placeholder="AKS-XXXXXX"/>{error&&<p className="text-sm text-red-600 mt-2">{error}</p>}<div className="flex justify-end gap-3 mt-6"><button onClick={()=>setStage('consent')} className="px-4 py-2 bg-gray-100 rounded-lg">Kembali</button><button onClick={validateToken} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Verifikasi dan Mulai</button></div></div></div>}</div>; };
         const MuridRouter = ({ route }) => {
             if (route === 'murid/settings') return <AdminSettings />;
             if (route === 'murid/results') return <MuridResults />;
