@@ -6971,9 +6971,16 @@ if ('serviceWorker' in navigator) {
 
         const AdminUsers = () => {
             useAksaraDataRefresh();
+            const { user: currentUser } = React.useContext(AppContext);
             const [query, setQuery] = React.useState('');
             const [role, setRole] = React.useState('');
             const [school, setSchool] = React.useState('');
+            const [editing, setEditing] = React.useState(null);
+            const [editForm, setEditForm] = React.useState({ name:'', username:'', email:'', role:'GURU', status:'ACTIVE', schoolId:'' });
+            const [saving, setSaving] = React.useState(false);
+            const [resetting, setResetting] = React.useState(false);
+            const [notice, setNotice] = React.useState('');
+            const [error, setError] = React.useState('');
             const users = mergeCollectionRecords('users');
             const schools = getRegisteredSchools();
             const roleLabel = { ADMIN_SUPER: 'Admin Super', GURU: 'Guru', MURID: 'Murid', ORANG_TUA: 'Orang Tua / Wali' };
@@ -6985,11 +6992,82 @@ if ('serviceWorker' in navigator) {
                 const hay = `${u.name || ''} ${u.username || ''} ${u.email || ''} ${roleLabel[u.role] || u.role || ''} ${getSchoolName(sid)}`.toLowerCase();
                 return (!query || hay.includes(query.toLowerCase())) && (!role || u.role === role) && (!school || String(sid) === String(school));
             });
+            const isSuperAdmin = u => String(u?.role || '').toUpperCase() === 'ADMIN_SUPER';
+            const openEdit = u => {
+                if (isSuperAdmin(u)) { setError('Akun Admin Super dilindungi dan tidak dapat diedit dari menu ini.'); setNotice(''); return; }
+                setError(''); setNotice(''); setEditing(u);
+                setEditForm({ name:u.name||'', username:u.username||'', email:u.email||'', role:u.role||'GURU', status:u.status||'ACTIVE', schoolId:u.schoolId||'' });
+            };
+            const saveEdit = async () => {
+                if (!editing) return;
+                if (!String(editForm.name||'').trim() || !String(editForm.username||'').trim()) { setError('Nama dan username wajib diisi.'); return; }
+                const duplicate = users.some(u => String(u.id)!==String(editing.id) && (String(u.username||'').toLowerCase()===String(editForm.username).trim().toLowerCase() || (editForm.email && String(u.email||'').toLowerCase()===String(editForm.email).trim().toLowerCase())));
+                if (duplicate) { setError('Username atau email sudah digunakan akun lain.'); return; }
+                setSaving(true); setError(''); setNotice('');
+                try {
+                    await aksaraFbReady();
+                    if (!AKSARA_FIREBASE.auth?.currentUser) throw new Error('Sesi Firebase tidak aktif. Silakan login ulang lalu coba kembali.');
+                    const updated = { ...editing, name:String(editForm.name).trim(), username:String(editForm.username).trim(), email:String(editForm.email||'').trim(), role:editForm.role, status:editForm.status, schoolId:editForm.schoolId||'' };
+                    const nextUsers = users.map(u => String(u.id)===String(editing.id) ? updated : u);
+                    await AKSARA_FIREBASE.db.ref('users').set(aksaraFbMap('users', nextUsers));
+                    DEMO_DB.users = nextUsers;
+                    persistDurableCollection('users', nextUsers);
+                    setEditing(null); setNotice('Perubahan akun berhasil disimpan.');
+                    window.dispatchEvent(new Event('aksara:firebase-changed'));
+                } catch(e) { setError('Gagal menyimpan perubahan akun: ' + (e?.message || e)); }
+                finally { setSaving(false); }
+            };
+            const resetAllData = async () => {
+                const phrase = window.prompt('PERINGATAN: tindakan ini menghapus seluruh data aplikasi di Firebase dan perangkat ini, kecuali akun Admin Super. Ketik HAPUS SEMUA untuk melanjutkan:');
+                if (phrase !== 'HAPUS SEMUA') { if (phrase !== null) setError('Konfirmasi tidak sesuai. Reset dibatalkan.'); return; }
+                if (!window.confirm('Yakin menghapus seluruh data sekolah, guru, murid, wali, kelas, soal, jadwal, hasil, dan data operasional lainnya? Akun Admin Super tetap dipertahankan. Tindakan ini tidak dapat dibatalkan.')) return;
+                setResetting(true); setError(''); setNotice('');
+                try {
+                    await aksaraFbReady();
+                    if (!AKSARA_FIREBASE.auth?.currentUser) throw new Error('Sesi Firebase tidak aktif. Silakan login ulang lalu coba kembali.');
+                    const currentUsers = mergeCollectionRecords('users');
+                    let superAdmins = currentUsers.filter(isSuperAdmin);
+                    if (!superAdmins.length && isSuperAdmin(currentUser)) superAdmins = [{ ...currentUser, role:'ADMIN_SUPER', status:currentUser.status||'ACTIVE' }];
+                    const keys = [...AKSARA_FIREBASE_SYNC_KEYS];
+                    const updates = {};
+                    keys.forEach(key => {
+                        if (key === 'users') updates[key] = aksaraFbMap('users', superAdmins);
+                        else if (key === 'systemHealth') updates[key] = { database:'UNKNOWN', api:'UNKNOWN', realtime:'UNKNOWN', storage:'UNKNOWN', activeUsers:0, activeCatSessions:0 };
+                        else updates[key] = {};
+                    });
+                    // Firebase ditulis dahulu. Cache lokal tidak dibersihkan jika operasi cloud gagal.
+                    await AKSARA_FIREBASE.db.ref().update(updates);
+                    AKSARA_FIREBASE.applying = true;
+                    try {
+                        keys.forEach(key => {
+                            if (key === 'users') DEMO_DB.users = superAdmins;
+                            else if (key === 'systemHealth') DEMO_DB.systemHealth = updates[key];
+                            else DEMO_DB[key] = [];
+                        });
+                        keys.forEach(key => {
+                            const value = key === 'systemHealth' ? updates[key] : (key === 'users' ? superAdmins : []);
+                            try {
+                                localStorage.setItem(`aksara_${key}`, JSON.stringify(value));
+                                localStorage.setItem(`master_${key}`, JSON.stringify(value));
+                                localStorage.setItem(`aksara_firebase_${key}`, JSON.stringify(value));
+                            } catch(_) {}
+                        });
+                    } finally { AKSARA_FIREBASE.applying = false; }
+                    setQuery(''); setRole(''); setSchool('');
+                    setNotice('Reset berhasil. Seluruh data operasional telah dihapus dari Firebase dan cache perangkat, akun Admin Super tetap dipertahankan.');
+                    window.dispatchEvent(new Event('aksara:firebase-changed'));
+                } catch(e) { setError('Reset gagal: ' + (e?.message || e) + '. Data lokal tidak sengaja dinyatakan terhapus; periksa koneksi dan izin Firebase.'); }
+                finally { setResetting(false); }
+            };
             return <div className="space-y-6 animate-in fade-in duration-500">
-                <div><h2 className="text-2xl font-heading font-bold text-gray-900">Data Pengguna</h2><p className="text-gray-500 text-sm">Seluruh akun yang sudah terdaftar pada sistem, terhubung dengan data Guru, Murid, dan Orang Tua/Wali.</p></div>
+                <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-2xl font-heading font-bold text-gray-900">Data Pengguna</h2><p className="text-gray-500 text-sm">Kelola akun Guru, Murid, Orang Tua/Wali, dan Admin. Akun Admin Super dilindungi dari pengeditan dan reset.</p></div><button disabled={resetting} onClick={resetAllData} className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-50">{resetting ? 'Mereset data...' : 'Reset Seluruh Data'}</button></div>
+                {notice && <div className="p-3 rounded-lg border border-green-200 bg-green-50 text-green-800 text-sm">{notice}</div>}
+                {error && <div className="p-3 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm">{error}<button onClick={()=>setError('')} className="ml-3 underline">Tutup</button></div>}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Object.entries(roleLabel).map(([r,label]) => <div key={r} className="bg-white border rounded-xl p-4"><p className="text-xs text-gray-500">{label}</p><p className="text-2xl font-bold mt-1">{users.filter(u => u.role === r).length}</p></div>)}</div>
-                <div className="bg-white rounded-xl border overflow-hidden"><div className="p-4 bg-gray-50 border-b flex flex-wrap gap-3"><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Cari nama, username, email..." className="flex-1 min-w-56 border rounded-lg p-2.5"/><select value={role} onChange={e=>setRole(e.target.value)} className="border rounded-lg p-2.5"><option value="">Semua Peran</option>{Object.entries(roleLabel).map(([r,label])=><option key={r} value={r}>{label}</option>)}</select><select value={school} onChange={e=>setSchool(e.target.value)} className="border rounded-lg p-2.5 min-w-56"><option value="">Semua Sekolah</option>{schools.map(sc=><option key={sc.id} value={sc.id}>{sc.name}</option>)}</select><button onClick={()=>{setQuery('');setRole('');setSchool('')}} className="px-3 py-2 border rounded-lg">Reset</button></div>
-                <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr className="bg-gray-50 border-b text-xs uppercase text-gray-500"><th className="p-4">No</th><th className="p-4">Nama</th><th className="p-4">Username</th><th className="p-4">Peran</th><th className="p-4">Sekolah</th><th className="p-4">Status</th></tr></thead><tbody className="divide-y text-sm">{rows.map((u,i)=>{ const teacher=DEMO_DB.teachers.find(t=>String(t.userId||'')===String(u.id||'')||String(t.id||'')===String(u.teacherId||'')); const student=DEMO_DB.students.find(st=>String(st.userId||'')===String(u.id||'')||String(st.id||'')===String(u.studentId||'')); const parent=DEMO_DB.parents.find(pa=>String(pa.userId||'')===String(u.id||'')||String(pa.id||'')===String(u.parentId||'')); const sid=u.schoolId||teacher?.schoolId||student?.schoolId||parent?.schoolId||''; return <tr key={u.id||u.username}><td className="p-4">{i+1}</td><td className="p-4 font-semibold">{u.name||'-'}</td><td className="p-4 font-mono">{u.username||u.email||'-'}</td><td className="p-4">{roleLabel[u.role]||u.role||'-'}</td><td className="p-4">{getSchoolName(sid)||'-'}</td><td className="p-4"><Badge status={u.status}/></td></tr>})}{!rows.length&&<tr><td colSpan="6" className="p-10 text-center text-gray-500">Belum ada pengguna yang sesuai.</td></tr>}</tbody></table></div></div></div>;
+                <div className="bg-white rounded-xl border overflow-hidden"><div className="p-4 bg-gray-50 border-b flex flex-wrap gap-3"><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Cari nama, username, email..." className="flex-1 min-w-56 border rounded-lg p-2.5"/><select value={role} onChange={e=>setRole(e.target.value)} className="border rounded-lg p-2.5"><option value="">Semua Peran</option>{Object.entries(roleLabel).map(([r,label])=><option key={r} value={r}>{label}</option>)}</select><select value={school} onChange={e=>setSchool(e.target.value)} className="border rounded-lg p-2.5 min-w-56"><option value="">Semua Sekolah</option>{schools.map(sc=><option key={sc.id} value={sc.id}>{sc.name}</option>)}</select><button onClick={()=>{setQuery('');setRole('');setSchool('')}} className="px-3 py-2 border rounded-lg">Bersihkan Filter</button></div>
+                <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr className="bg-gray-50 border-b text-xs uppercase text-gray-500"><th className="p-4">No</th><th className="p-4">Nama</th><th className="p-4">Username</th><th className="p-4">Peran</th><th className="p-4">Sekolah</th><th className="p-4">Status</th><th className="p-4">Aksi</th></tr></thead><tbody className="divide-y text-sm">{rows.map((u,i)=>{ const teacher=DEMO_DB.teachers.find(t=>String(t.userId||'')===String(u.id||'')||String(t.id||'')===String(u.teacherId||'')); const student=DEMO_DB.students.find(st=>String(st.userId||'')===String(u.id||'')||String(st.id||'')===String(u.studentId||'')); const parent=DEMO_DB.parents.find(pa=>String(pa.userId||'')===String(u.id||'')||String(pa.id||'')===String(u.parentId||'')); const sid=u.schoolId||teacher?.schoolId||student?.schoolId||parent?.schoolId||''; return <tr key={u.id||u.username}><td className="p-4">{i+1}</td><td className="p-4 font-semibold">{u.name||'-'}</td><td className="p-4 font-mono">{u.username||u.email||'-'}</td><td className="p-4">{roleLabel[u.role]||u.role||'-'}</td><td className="p-4">{getSchoolName(sid)||'-'}</td><td className="p-4"><Badge status={u.status}/></td><td className="p-4">{isSuperAdmin(u) ? <span className="text-xs text-gray-500">Dilindungi</span> : <button onClick={()=>openEdit(u)} className="px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50">Edit Akun</button>}</td></tr>})}{!rows.length&&<tr><td colSpan="7" className="p-10 text-center text-gray-500">Belum ada pengguna yang sesuai.</td></tr>}</tbody></table></div></div>
+                {editing && <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6"><div className="flex justify-between items-start gap-3"><div><h3 className="text-xl font-bold">Edit Akun Pengguna</h3><p className="text-sm text-gray-500 mt-1">ID: {editing.id || '-'}. Akun Admin Super tidak dapat diedit.</p></div><button onClick={()=>setEditing(null)} className="text-gray-500 text-xl" aria-label="Tutup">×</button></div><div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5"><label className="text-sm font-medium">Nama<input value={editForm.name} onChange={e=>setEditForm(f=>({...f,name:e.target.value}))} className="mt-1 w-full border rounded-lg p-2.5"/></label><label className="text-sm font-medium">Username<input value={editForm.username} onChange={e=>setEditForm(f=>({...f,username:e.target.value}))} className="mt-1 w-full border rounded-lg p-2.5"/></label><label className="text-sm font-medium">Email<input type="email" value={editForm.email} onChange={e=>setEditForm(f=>({...f,email:e.target.value}))} className="mt-1 w-full border rounded-lg p-2.5"/></label><label className="text-sm font-medium">Peran<select value={editForm.role} onChange={e=>setEditForm(f=>({...f,role:e.target.value}))} className="mt-1 w-full border rounded-lg p-2.5"><option value="GURU">Guru</option><option value="MURID">Murid</option><option value="ORANG_TUA">Orang Tua / Wali</option></select></label><label className="text-sm font-medium">Status<select value={editForm.status} onChange={e=>setEditForm(f=>({...f,status:e.target.value}))} className="mt-1 w-full border rounded-lg p-2.5"><option value="ACTIVE">Aktif</option><option value="INACTIVE">Nonaktif</option><option value="SUSPENDED">Ditangguhkan</option></select></label><label className="text-sm font-medium">Sekolah<select value={editForm.schoolId} onChange={e=>setEditForm(f=>({...f,schoolId:e.target.value}))} className="mt-1 w-full border rounded-lg p-2.5"><option value="">Tidak ditentukan</option>{schools.map(sc=><option key={sc.id} value={sc.id}>{sc.name}</option>)}</select></label></div><p className="text-xs text-amber-700 bg-amber-50 rounded-lg p-3 mt-4">Perubahan nama, username, peran, status, dan sekolah disimpan ke database aplikasi. Perubahan username/email di sini tidak mengubah kredensial Firebase Authentication yang sudah terdaftar.</p><div className="flex justify-end gap-3 mt-6"><button disabled={saving} onClick={()=>setEditing(null)} className="px-4 py-2 rounded-lg border">Batal</button><button disabled={saving} onClick={saveEdit} className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50">{saving?'Menyimpan...':'Simpan Perubahan'}</button></div></div></div>}
+            </div>;
         };
 
         const AdminRouter = ({ route }) => {
