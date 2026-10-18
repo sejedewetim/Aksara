@@ -913,17 +913,17 @@ var mockApiService = {
             return _context6.a(2, new Promise(function (resolve) {
               setTimeout(function () {
                 var results = DEMO_DB.examResults.filter(function (r) {
-                  return !scheduleId || String(r.scheduleId || r.jadwalId || '') === String(scheduleId);
+                  return r.scheduleId === scheduleId;
                 });
                 var detailedResults = results.map(function (r) {
                   var student = DEMO_DB.students.find(function (s) {
-                    return String(s.id || s.studentId) === String(r.studentId || r.muridId);
+                    return s.id === r.studentId;
                   });
                   var cls = DEMO_DB.classes.find(function (c) {
                     return c.id === (student === null || student === void 0 ? void 0 : student.classId);
                   });
                   return _objectSpread(_objectSpread({}, r), {}, {
-                    studentName: r.studentName || (student === null || student === void 0 ? void 0 : student.name) || r.studentId || 'Murid tidak ditemukan',
+                    studentName: student === null || student === void 0 ? void 0 : student.name,
                     nisn: student === null || student === void 0 ? void 0 : student.nisn,
                     className: cls === null || cls === void 0 ? void 0 : cls.name
                   });
@@ -1989,25 +1989,25 @@ var AdminQuestionBank = function AdminQuestionBank() {
     className: "text-sm text-gray-500"
   }, "Total Soal"), /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold"
-  }, DEMO_DB.questions.length.toLocaleString('id-ID'))), /*#__PURE__*/React.createElement("div", {
+  }, "1,245")), /*#__PURE__*/React.createElement("div", {
     className: "bg-white p-4 rounded-xl border border-gray-200 shadow-sm"
   }, /*#__PURE__*/React.createElement("p", {
     className: "text-sm text-teal-600"
   }, "Active / Approved"), /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold text-teal-700"
-  }, DEMO_DB.questions.filter(function(q){return ['ACTIVE','APPROVED','PUBLISHED','READY'].includes(String(q.status || 'ACTIVE').toUpperCase());}).length.toLocaleString('id-ID'))), /*#__PURE__*/React.createElement("div", {
+  }, "980")), /*#__PURE__*/React.createElement("div", {
     className: "bg-white p-4 rounded-xl border border-gray-200 shadow-sm"
   }, /*#__PURE__*/React.createElement("p", {
     className: "text-sm text-amber-600"
   }, "Review"), /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold text-amber-700"
-  }, DEMO_DB.questions.filter(function(q){return ['REVIEW','REVIEWED','NEEDS_REVIEW'].includes(String(q.status || '').toUpperCase());}).length.toLocaleString('id-ID'))), /*#__PURE__*/React.createElement("div", {
+  }, "45")), /*#__PURE__*/React.createElement("div", {
     className: "bg-white p-4 rounded-xl border border-gray-200 shadow-sm"
   }, /*#__PURE__*/React.createElement("p", {
     className: "text-sm text-gray-500"
   }, "Draft"), /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold"
-  }, DEMO_DB.questions.filter(function(q){return ['DRAFT','DRAF'].includes(String(q.status || '').toUpperCase());}).length.toLocaleString('id-ID')))), /*#__PURE__*/React.createElement("div", {
+  }, "220"))), /*#__PURE__*/React.createElement("div", {
     className: "bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
   }, /*#__PURE__*/React.createElement("div", {
     className: "p-4 border-b border-gray-200 bg-gray-50 flex gap-4"
@@ -2596,25 +2596,25 @@ var AdminDashboard = function AdminDashboard() {
     className: "text-gray-500 text-sm"
   }, "Sekolah"), /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold"
-  }, getRegisteredSchools().length)), /*#__PURE__*/React.createElement("div", {
+  }, DEMO_DB.schools.length)), /*#__PURE__*/React.createElement("div", {
     className: "bg-white p-5 rounded-xl border shadow-sm"
   }, /*#__PURE__*/React.createElement("p", {
     className: "text-gray-500 text-sm"
   }, "Guru"), /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold"
-  }, mergeCollectionRecords('teachers').length)), /*#__PURE__*/React.createElement("div", {
+  }, DEMO_DB.teachers.length)), /*#__PURE__*/React.createElement("div", {
     className: "bg-white p-5 rounded-xl border shadow-sm"
   }, /*#__PURE__*/React.createElement("p", {
     className: "text-gray-500 text-sm"
   }, "Murid"), /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold"
-  }, getRegisteredStudents().length)), /*#__PURE__*/React.createElement("div", {
+  }, DEMO_DB.students.length)), /*#__PURE__*/React.createElement("div", {
     className: "bg-white p-5 rounded-xl border shadow-sm"
   }, /*#__PURE__*/React.createElement("p", {
     className: "text-gray-500 text-sm"
   }, "Orang Tua"), /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold"
-  }, mergeCollectionRecords('parents').length))));
+  }, DEMO_DB.parents.length))));
 };
 var GuruDashboard = function GuruDashboard() {
   var _React$useContext10 = React.useContext(AppContext),
@@ -3903,33 +3903,14 @@ if ('serviceWorker' in navigator) {
             getResultsSummary: async (scheduleId) => {
                 return new Promise(resolve => {
                     setTimeout(() => {
-                        const norm = value => String(value ?? '').trim();
-                        const allResults = Array.isArray(DEMO_DB.examResults) ? DEMO_DB.examResults : [];
-                        const results = allResults.filter(r => !norm(scheduleId) || norm(r.scheduleId || r.jadwalId) === norm(scheduleId));
+                        const results = DEMO_DB.examResults.filter(r => r.scheduleId === scheduleId);
                         const detailedResults = results.map(r => {
-                            const student = (DEMO_DB.students || []).find(s => norm(s.id || s.studentId) === norm(r.studentId || r.muridId));
-                            const attempt = (DEMO_DB.examAttempts || []).find(a => norm(a.id || a.attemptId) === norm(r.attemptId));
-                            const schedule = (DEMO_DB.examSchedules || []).find(x => norm(x.id || x.scheduleId) === norm(r.scheduleId || r.jadwalId));
-                            const pkg = (DEMO_DB.examPackages || []).find(x => norm(x.id) === norm(r.packageId || schedule?.packageId));
-                            const cls = (DEMO_DB.classes || []).find(c => norm(c.id || c.classId) === norm(student?.classId || student?.kelasId));
-                            const percentageValue = Number(r.percentage ?? r.finalScore ?? (Number(r.maxScore) > 0 ? Number(r.totalScore || 0) / Number(r.maxScore) * 100 : NaN));
-                            return { ...r,
-                                id: r.id || `RESULT-${r.attemptId || r.studentId || Math.random().toString(36).slice(2)}`,
-                                studentId: r.studentId || r.muridId || student?.id || '',
-                                studentName: r.studentName || student?.name || student?.nama || 'Murid tidak ditemukan',
-                                nisn: r.nisn || student?.nisn || student?.nis || '',
-                                className: r.className || cls?.name || cls?.className || '-',
-                                scheduleId: r.scheduleId || r.jadwalId || schedule?.id || '',
-                                examName: r.examName || schedule?.name || pkg?.name || '-',
-                                percentage: Number.isFinite(percentageValue) ? percentageValue.toFixed(2) : '-',
-                                correctCount: Number.isFinite(Number(r.correctCount)) ? Number(r.correctCount) : 0,
-                                incorrectCount: Number.isFinite(Number(r.incorrectCount)) ? Number(r.incorrectCount) : 0,
-                                attemptStatus: r.attemptStatus || attempt?.status || '-',
-                                correctionStatus: r.correctionStatus || r.status || '-'
-                            };
+                            const student = DEMO_DB.students.find(s => s.id === r.studentId);
+                            const cls = DEMO_DB.classes.find(c => c.id === student?.classId);
+                            return { ...r, studentName: student?.name, nisn: student?.nisn, className: cls?.name };
                         });
                         resolve({ success: true, data: detailedResults });
-                    }, 100);
+                    }, 500);
                 });
             },
             getMyResults: async (studentId) => {
@@ -4841,39 +4822,7 @@ if ('serviceWorker' in navigator) {
             });
             return out;
         };
-        const getRegisteredSchools = () => {
-            // Saat Firebase sudah selesai dihidrasi, DEMO_DB adalah snapshot kanonis.
-            // Jangan menggabungkan cache browser lama karena record yang sudah dihapus
-            // dapat muncul lagi dan membuat jumlah sekolah lebih besar dari daftar aktual.
-            const source = AKSARA_FIREBASE?.started
-                ? normalizeCollectionArray(DEMO_DB.schools)
-                : mergeCollectionRecords('schools');
-            const result = [];
-            const byId = new Map(), byNpsn = new Map(), byName = new Map();
-            const norm = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
-            source.forEach(raw => {
-                if (!raw || typeof raw !== 'object') return;
-                const item = { ...raw };
-                const id = norm(item.id || item.schoolId || item.sekolahId || item.kodeSekolah);
-                const npsn = norm(item.npsn || item.NPSN);
-                const name = norm(item.name || item.schoolName || item.namaSekolah);
-                if (!id && !npsn && !name) return;
-                let index = (id && byId.get(id)) ?? (npsn && byNpsn.get(npsn)) ?? (!npsn && name && byName.get(name));
-                if (index !== undefined && index !== null) {
-                    // Record paling baru pada source menang, data pelengkap tetap dipertahankan.
-                    result[index] = { ...result[index], ...item };
-                } else {
-                    index = result.length;
-                    result.push(item);
-                }
-                const saved = result[index];
-                [saved.id, saved.schoolId, saved.sekolahId, saved.kodeSekolah].map(norm).filter(Boolean).forEach(v => byId.set(v, index));
-                [saved.npsn, saved.NPSN].map(norm).filter(Boolean).forEach(v => byNpsn.set(v, index));
-                const savedName = norm(saved.name || saved.schoolName || saved.namaSekolah);
-                if (savedName) byName.set(savedName, index);
-            });
-            return result.filter(s => s && (s.id || s.schoolId || s.sekolahId) && (s.name || s.schoolName || s.namaSekolah));
-        };
+        const getRegisteredSchools = () => mergeCollectionRecords('schools').filter(s => s && s.id && (s.name || s.schoolName));
         const getSchoolName = (schoolId, fallbackName = '') => {
             const ref = String(schoolId ?? '').trim();
             const fallback = String(fallbackName ?? '').trim();
@@ -4994,56 +4943,21 @@ if ('serviceWorker' in navigator) {
         };
 
         const getActualRegisteredUsers = () => {
-            // Akun pengguna adalah gabungan akun pusat dan profil role yang memang
-            // dapat dipakai untuk login oleh resolver AKSARA versi lama.
-            const canonical = key => AKSARA_FIREBASE?.started
-                ? normalizeCollectionArray(DEMO_DB[key])
-                : mergeCollectionRecords(key);
-            const out = [];
-            const roleOf = record => {
-                let role = String(record?.role || record?.peran || '').trim().toUpperCase();
-                if (['ADMIN','ADMINISTRATOR','SUPERADMIN','SUPER_ADMIN','ADMIN_SUPER'].includes(role)) return 'ADMIN_SUPER';
-                if (['TEACHER','GURU'].includes(role)) return 'GURU';
-                if (['STUDENT','MURID','SISWA'].includes(role)) return 'MURID';
-                if (['PARENT','WALI','ORANG TUA','ORANGTUA','ORANG_TUA'].includes(role)) return 'ORANG_TUA';
-                return role;
+            const out = []; const seen = new Set();
+            const add = (record, role) => {
+                if (!record || String(record.status || 'ACTIVE').toUpperCase() !== 'ACTIVE') return;
+                const id = String(record.userId || record.id || record.studentId || record.teacherId || record.parentId || record.nisn || record.username || '').trim();
+                if (!id) return;
+                const key = `${role}:${id}`;
+                if (seen.has(key)) return;
+                seen.add(key); out.push({ ...record, role });
             };
-            const roleSources = [
-                ...canonical('users').map(r => ({ record:r, role:roleOf(r) })),
-                ...canonical('teachers').map(record => ({ record, role:'GURU' })),
-                ...getRegisteredStudents().map(record => ({ record, role:'MURID' })),
-                ...canonical('parents').map(record => ({ record, role:'ORANG_TUA' }))
-            ];
-            const norm = value => String(value ?? '').trim().toLowerCase();
-            const identityFields = record => [record.username, record.userName, record.email, record.nisn, record.nis, record.nip, record.nuptk].map(norm).filter(Boolean);
-            roleSources.forEach(({record, role}) => {
-                if (!record || !role) return;
-                const id = String(record.id || record.userId || record.studentId || record.teacherId || record.parentId || '').trim();
-                const username = String(record.username || record.userName || record.email || record.nisn || record.nis || record.nip || record.nuptk || '').trim();
-                if (!id && !username) return;
-                const fields = identityFields(record);
-                let index = out.findIndex(existing => existing.role === role && (
-                    (id && [existing.id, existing.userId, existing.studentId, existing.teacherId, existing.parentId].some(v => String(v || '').trim() === id)) ||
-                    fields.some(value => identityFields(existing).includes(value))
-                ));
-                const normalized = { ...record, role, id: record.id || record.userId || record.studentId || record.teacherId || record.parentId || id, username: record.username || record.userName || record.email || record.nisn || record.nis || record.nip || record.nuptk || '' };
-                if (index >= 0) {
-                    // Profil master melengkapi akun, tetapi nilai yang sudah tersedia tidak dihapus.
-                    out[index] = { ...out[index], ...normalized };
-                } else out.push(normalized);
-            });
+            mergeCollectionRecords('teachers').forEach(r => add(r, 'GURU'));
+            getRegisteredStudents().forEach(r => add(r, 'MURID'));
+            mergeCollectionRecords('parents').forEach(r => add(r, 'ORANG_TUA'));
             return out;
         };
-        const aksaraAccountIsActiveForCount = record => {
-            const status = String(record?.status ?? record?.accountStatus ?? record?.account_status ?? record?.state ?? 'ACTIVE').trim().toUpperCase();
-            return record?.active !== false && record?.aktif !== false && !['INACTIVE','NONAKTIF','SUSPENDED','DISABLED','BLOCKED','DELETED','PENDING'].includes(status);
-        };
-        const aksaraAccountCanLogin = record => {
-            const identifier = String(record?.username || record?.userName || record?.email || record?.nisn || record?.nis || record?.nip || record?.nuptk || '').trim();
-            const password = String(record?.password || record?.kataSandi || record?.kata_sandi || record?.['kata sandi'] || record?.pass || record?.passwordPlain || record?.plainPassword || record?.loginPassword || record?.login_password || record?.passcode || record?.pin || '').trim();
-            return !!identifier && aksaraAccountIsActiveForCount(record) && (!!password || !!record?.firebaseUid || !!record?.firebaseUID);
-        };
-        const getActualActiveUserCount = () => getActualRegisteredUsers().filter(aksaraAccountCanLogin).length;
+        const getActualActiveUserCount = () => getActualRegisteredUsers().length;
 
         const useAksaraDataRefresh = () => {
             const [, setTick] = React.useState(0);
@@ -5936,7 +5850,7 @@ if ('serviceWorker' in navigator) {
                 {error && !editing && <div role="alert" className="p-3 rounded-lg border border-red-200 bg-red-50 text-red-700">{error}</div>}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                     <div className="overflow-x-auto"><table className="w-full text-left border-collapse"><thead><tr className="bg-gray-50/50 border-b border-gray-200 text-xs uppercase text-gray-500 font-semibold"><th className="px-6 py-4">Nama Paket & Info</th><th className="px-6 py-4">Bank Soal</th><th className="px-6 py-4">Durasi</th><th className="px-6 py-4">Status</th><th className="px-6 py-4 text-right">Aksi</th></tr></thead>
-                    <tbody className="divide-y divide-gray-100 text-sm">{packages.map(pkg => <tr key={pkg.id} className="hover:bg-gray-50"><td className="px-6 py-4"><div className="font-bold text-gray-900">{pkg.name}</div><div className="text-gray-500 text-xs">{subjects.find(s => String(s.id) === String(pkg.subjectId))?.name || pkg.subjectId || '-'}{pkg.grade ? ` • Kelas ${pkg.grade}` : ''}</div></td><td className="px-6 py-4 text-gray-600 text-xs">{(Array.isArray(pkg.questionIds) && pkg.questionIds.length ? pkg.questionIds : Array.isArray(pkg.bankQuestionIds) ? pkg.bankQuestionIds : []).filter(qid => allQuestions.some(q => String(q.id) === String(qid) && ['ACTIVE','APPROVED','PUBLISHED','READY'].includes(String(q.status || 'ACTIVE').toUpperCase()))).length} soal tersedia</td><td className="px-6 py-4 text-gray-600 text-xs">{pkg.duration || 0} Menit</td><td className="px-6 py-4"><Badge status={pkg.status || 'DRAFT'} /></td><td className="px-6 py-4 text-right whitespace-nowrap"><button onClick={() => openView(pkg)} className="text-aksara-600 mr-3">Lihat</button><button onClick={() => openEdit(pkg)} className="text-amber-600 mr-3">Edit</button><button onClick={() => remove(pkg)} className="text-red-600">Hapus</button></td></tr>)}{!packages.length && <tr><td colSpan="5" className="p-10 text-center text-gray-500">Belum ada paket ujian.</td></tr>}</tbody></table></div>
+                    <tbody className="divide-y divide-gray-100 text-sm">{packages.map(pkg => <tr key={pkg.id} className="hover:bg-gray-50"><td className="px-6 py-4"><div className="font-bold text-gray-900">{pkg.name}</div><div className="text-gray-500 text-xs">{subjects.find(s => String(s.id) === String(pkg.subjectId))?.name || pkg.subjectId || '-'}{pkg.grade ? ` • Kelas ${pkg.grade}` : ''}</div></td><td className="px-6 py-4 text-gray-600 text-xs">{(pkg.questionIds || pkg.bankQuestionIds || []).length || pkg.totalQuestions || 0} Soal</td><td className="px-6 py-4 text-gray-600 text-xs">{pkg.duration || 0} Menit</td><td className="px-6 py-4"><Badge status={pkg.status || 'DRAFT'} /></td><td className="px-6 py-4 text-right whitespace-nowrap"><button onClick={() => openView(pkg)} className="text-aksara-600 mr-3">Lihat</button><button onClick={() => openEdit(pkg)} className="text-amber-600 mr-3">Edit</button><button onClick={() => remove(pkg)} className="text-red-600">Hapus</button></td></tr>)}{!packages.length && <tr><td colSpan="5" className="p-10 text-center text-gray-500">Belum ada paket ujian.</td></tr>}</tbody></table></div>
                 </div>
                 {editing && <div role="dialog" aria-modal="true" className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-gray-900/50"><form onSubmit={save} className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[92vh] overflow-y-auto p-6"><div className="flex justify-between items-center mb-5"><div><h3 className="text-xl font-bold">{viewOnly ? 'Lihat Paket Ujian' : editing.id && packages.some(p => p.id === editing.id) ? 'Edit Paket Ujian' : 'Buat Paket Ujian'}</h3><p className="text-sm text-gray-500 mt-1">Pilih soal langsung dari Bank Soal.</p></div><button type="button" onClick={close} className="text-2xl text-gray-400">×</button></div>
                     {error && <div role="alert" className="mb-4 p-3 rounded-lg bg-red-50 text-red-700">{error}</div>}
@@ -6227,11 +6141,11 @@ if ('serviceWorker' in navigator) {
             const [activeTab, setActiveTab] = React.useState('REKAP');
             const [feedback, setFeedback] = React.useState('');
             const filteredResults = React.useMemo(() => results.filter(result => {
-                const student = (DEMO_DB.students || []).find(item => String(item.id || item.studentId) === String(result.studentId || result.muridId));
+                const student = DEMO_DB.students.find(item => item.id === result.studentId);
                 const resultSchoolId = result.schoolId || result.sekolahId || student?.schoolId || student?.sekolahId;
-                const schedule = (DEMO_DB.examSchedules || []).find(item => String(item.id || item.scheduleId) === String(result.scheduleId || result.jadwalId));
-                const pkg = (DEMO_DB.examPackages || []).find(item => String(item.id) === String(result.packageId || result.paketId || schedule?.packageId || schedule?.examId));
-                const subjectId = result.subjectId || result.mapelId || schedule?.subjectId || schedule?.mapelId || pkg?.subjectId || pkg?.mapelId;
+                const schedule = DEMO_DB.examSchedules.find(item => item.id === result.scheduleId);
+                const pkg = DEMO_DB.examPackages.find(item => item.id === (result.packageId || result.paketId || schedule?.packageId));
+                const subjectId = result.subjectId || result.mapelId || pkg?.subjectId;
                 const schoolOk = isAdmin ? (!selectedSchools.length || selectedSchools.includes(String(resultSchoolId || ''))) : (!schoolId || String(resultSchoolId || '') === schoolId);
                 return schoolOk && (!selectedSubjects.length || selectedSubjects.includes(String(subjectId || '')));
             }), [results, schoolId, selectedSubjects]);
@@ -6252,9 +6166,8 @@ if ('serviceWorker' in navigator) {
                 setFeedback('Nilai berhasil dipublikasikan ke Dasbor Murid.');
             };
 
-            const scoredResults = filteredResults.filter(r => Number.isFinite(Number(r.percentage)) && String(r.percentage).trim() !== '');
-            const avgScore = scoredResults.length > 0 ? (scoredResults.reduce((acc, curr) => acc + Number(curr.percentage), 0) / scoredResults.length).toFixed(1) : '0.0';
-            const highest = scoredResults.length > 0 ? Math.max(...scoredResults.map(r => Number(r.percentage))).toFixed(1) : '0.0';
+            const avgScore = filteredResults.length > 0 ? (filteredResults.reduce((acc, curr) => acc + parseFloat(curr.percentage), 0) / filteredResults.length).toFixed(1) : 0;
+            const highest = filteredResults.length > 0 ? Math.max(...filteredResults.map(r => parseFloat(r.percentage))) : 0;
             const isPublished = filteredResults.some(r => r.status === 'PUBLISHED');
 
             return (
@@ -6276,7 +6189,7 @@ if ('serviceWorker' in navigator) {
                     <div className="grid grid-cols-3 gap-4">
                         <div className="bg-white p-5 rounded-xl border border-gray-200"><p className="text-sm text-gray-500">Rata-rata Kelas</p><p className="text-3xl font-bold text-gray-900">{avgScore} / 100</p></div>
                         <div className="bg-white p-5 rounded-xl border border-gray-200"><p className="text-sm text-gray-500">Tertinggi</p><p className="text-3xl font-bold text-teal-600">{highest} / 100</p></div>
-                        <div className="bg-white p-5 rounded-xl border border-gray-200"><p className="text-sm text-gray-500">Peserta Dinilai</p><p className="text-3xl font-bold text-gray-900">{scoredResults.length}</p></div>
+                        <div className="bg-white p-5 rounded-xl border border-gray-200"><p className="text-sm text-gray-500">Peserta Dinilai</p><p className="text-3xl font-bold text-gray-900">{filteredResults.length}</p></div>
                     </div>
 
                     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -6293,10 +6206,10 @@ if ('serviceWorker' in navigator) {
                                     <tbody className="divide-y text-sm">
                                         {filteredResults.length === 0 ? <tr><td colSpan="4" className="px-6 py-10 text-center text-gray-500">Tidak ada hasil sesuai filter.</td></tr> : filteredResults.map(r => (
                                             <tr key={r.id}>
-                                                <td className="px-6 py-4 font-medium">{r.studentName || r.studentId || '-' }<span className="block text-xs text-gray-500">{r.nisn || ''}</span></td>
-                                                <td className="px-6 py-4">{Number(r.correctCount || 0)} B / {Number(r.incorrectCount || 0)} S</td>
-                                                <td className="px-6 py-4 font-bold">{Number.isFinite(Number(r.percentage)) ? `${Number(r.percentage).toFixed(2)}%` : 'Belum dinilai'}</td>
-                                                <td className="px-6 py-4"><span className="px-2 py-1 bg-indigo-50 text-aksara-900 rounded font-bold">{r.grade || (r.status === 'NEEDS_REVIEW' ? 'Perlu koreksi' : '-')}</span></td>
+                                                <td className="px-6 py-4 font-medium">{r.studentName}</td>
+                                                <td className="px-6 py-4">{r.correctCount} B / {r.incorrectCount} S</td>
+                                                <td className="px-6 py-4 font-bold">{r.percentage}%</td>
+                                                <td className="px-6 py-4"><span className="px-2 py-1 bg-indigo-50 text-aksara-900 rounded font-bold">{r.grade}</span></td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -6356,14 +6269,13 @@ if ('serviceWorker' in navigator) {
         };
 
         const AdminDashboard = () => {
-            useAksaraDataRefresh();
             const { user, setRoute } = React.useContext(AppContext);
             const activeUsers = getActualActiveUserCount();
             const activeStudents = getRegisteredStudents().filter(item => String(item.status || 'ACTIVE').toUpperCase() === 'ACTIVE').length;
-            const activeSchools = getRegisteredSchools().filter(item => !['INACTIVE','NONAKTIF','DISABLED','DELETED'].includes(String(item.status || 'ACTIVE').toUpperCase())).length;
+            const activeSchools = DEMO_DB.schools.filter(item => item.status === 'ACTIVE').length;
             const shortcutItems = [
                 ['admin/users', 'user-cog', 'Data Pengguna', `${getActualActiveUserCount()} pengguna aktif`],
-                ['admin/schools', 'building', 'Data Sekolah', `${getRegisteredSchools().length} sekolah`],
+                ['admin/schools', 'building', 'Data Sekolah', `${DEMO_DB.schools.length} sekolah`],
                 ['admin/teachers', 'users', 'Data Guru', `${DEMO_DB.teachers.length} guru`],
                 ['admin/students', 'graduation-cap', 'Data Murid', `${getRegisteredStudents().length} murid`],
                 ['admin/parents', 'user-check', 'Orang Tua / Wali', `${DEMO_DB.parents.length} wali`],
@@ -6391,10 +6303,10 @@ if ('serviceWorker' in navigator) {
                     </section>
                     <section aria-labelledby="distribution-title" className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
                         <div className="flex items-center justify-between mb-4"><div><h3 id="distribution-title" className="font-heading font-bold text-gray-900">Distribusi Data Akademik</h3><p className="text-xs text-gray-500">Ringkasan data yang tersedia saat ini</p></div><span className="text-xs text-gray-500">Nilai</span></div>
-                        <div className="space-y-3">{[['Sekolah', getRegisteredSchools().length, 'bg-aksara-600'], ['Guru', DEMO_DB.teachers.length, 'bg-teal-500'], ['Murid', getRegisteredStudents().length, 'bg-amber-500'], ['Soal', DEMO_DB.questions.length, 'bg-indigo-500']].map(([label, value, color]) => <div key={label} className="flex items-center gap-3"><span className="w-20 text-xs text-gray-600">{label}</span><div className="flex-1 h-3 rounded-full bg-gray-100 overflow-hidden"><div className={`h-full ${color} rounded-full`} style={{width: `${Math.min(100, value ? Math.max(8, value / Math.max(1, DEMO_DB.students.length, DEMO_DB.questions.length) * 100) : 0)}%`}}></div></div><span className="w-8 text-right text-sm font-semibold text-gray-900">{value || 0}</span></div>)}</div>
+                        <div className="space-y-3">{[['Sekolah', DEMO_DB.schools.length, 'bg-aksara-600'], ['Guru', DEMO_DB.teachers.length, 'bg-teal-500'], ['Murid', getRegisteredStudents().length, 'bg-amber-500'], ['Soal', DEMO_DB.questions.length, 'bg-indigo-500']].map(([label, value, color]) => <div key={label} className="flex items-center gap-3"><span className="w-20 text-xs text-gray-600">{label}</span><div className="flex-1 h-3 rounded-full bg-gray-100 overflow-hidden"><div className={`h-full ${color} rounded-full`} style={{width: `${Math.min(100, value ? Math.max(8, value / Math.max(1, DEMO_DB.students.length, DEMO_DB.questions.length) * 100) : 0)}%`}}></div></div><span className="w-8 text-right text-sm font-semibold text-gray-900">{value || 0}</span></div>)}</div>
                     </section>
                     <div className="grid grid-cols-4 gap-4">
-                        <div className="bg-white p-5 rounded-xl border shadow-sm"><p className="text-gray-500 text-sm">Sekolah</p><p className="text-2xl font-bold">{getRegisteredSchools().length}</p></div>
+                        <div className="bg-white p-5 rounded-xl border shadow-sm"><p className="text-gray-500 text-sm">Sekolah</p><p className="text-2xl font-bold">{DEMO_DB.schools.length}</p></div>
                         <div className="bg-white p-5 rounded-xl border shadow-sm"><p className="text-gray-500 text-sm">Guru</p><p className="text-2xl font-bold">{DEMO_DB.teachers.length}</p></div>
                         <div className="bg-white p-5 rounded-xl border shadow-sm"><p className="text-gray-500 text-sm">Murid</p><p className="text-2xl font-bold">{getRegisteredStudents().length}</p></div>
                         <div className="bg-white p-5 rounded-xl border shadow-sm"><p className="text-gray-500 text-sm">Orang Tua</p><p className="text-2xl font-bold">{DEMO_DB.parents.length}</p></div>
@@ -7063,7 +6975,7 @@ if ('serviceWorker' in navigator) {
             const [query, setQuery] = React.useState('');
             const [role, setRole] = React.useState('');
             const [school, setSchool] = React.useState('');
-            const users = getActualRegisteredUsers();
+            const users = mergeCollectionRecords('users');
             const schools = getRegisteredSchools();
             const roleLabel = { ADMIN_SUPER: 'Admin Super', GURU: 'Guru', MURID: 'Murid', ORANG_TUA: 'Orang Tua / Wali' };
             const rows = users.filter(u => {
@@ -7076,10 +6988,9 @@ if ('serviceWorker' in navigator) {
             });
             return <div className="space-y-6 animate-in fade-in duration-500">
                 <div><h2 className="text-2xl font-heading font-bold text-gray-900">Data Pengguna</h2><p className="text-gray-500 text-sm">Seluruh akun yang sudah terdaftar pada sistem, terhubung dengan data Guru, Murid, dan Orang Tua/Wali.</p></div>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3"><div className="bg-white border rounded-xl p-4"><p className="text-xs text-gray-500">Total Akun Terdaftar</p><p className="text-2xl font-bold mt-1">{users.length}</p></div><div className="bg-white border rounded-xl p-4"><p className="text-xs text-gray-500">Akun Aktif yang Dapat Digunakan</p><p className="text-2xl font-bold mt-1">{users.filter(aksaraAccountCanLogin).length}</p></div><div className="bg-white border rounded-xl p-4"><p className="text-xs text-gray-500">Akun Belum Siap Digunakan</p><p className="text-2xl font-bold mt-1">{users.filter(u => !aksaraAccountCanLogin(u)).length}</p></div></div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Object.entries(roleLabel).map(([r,label]) => <div key={r} className="bg-white border rounded-xl p-4"><p className="text-xs text-gray-500">{label}</p><p className="text-2xl font-bold mt-1">{users.filter(u => u.role === r).length}</p><p className="text-xs text-gray-500 mt-1">Dapat digunakan: {users.filter(u => u.role === r && aksaraAccountCanLogin(u)).length}</p></div>)}</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Object.entries(roleLabel).map(([r,label]) => <div key={r} className="bg-white border rounded-xl p-4"><p className="text-xs text-gray-500">{label}</p><p className="text-2xl font-bold mt-1">{users.filter(u => u.role === r).length}</p></div>)}</div>
                 <div className="bg-white rounded-xl border overflow-hidden"><div className="p-4 bg-gray-50 border-b flex flex-wrap gap-3"><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Cari nama, username, email..." className="flex-1 min-w-56 border rounded-lg p-2.5"/><select value={role} onChange={e=>setRole(e.target.value)} className="border rounded-lg p-2.5"><option value="">Semua Peran</option>{Object.entries(roleLabel).map(([r,label])=><option key={r} value={r}>{label}</option>)}</select><select value={school} onChange={e=>setSchool(e.target.value)} className="border rounded-lg p-2.5 min-w-56"><option value="">Semua Sekolah</option>{schools.map(sc=><option key={sc.id} value={sc.id}>{sc.name}</option>)}</select><button onClick={()=>{setQuery('');setRole('');setSchool('')}} className="px-3 py-2 border rounded-lg">Reset</button></div>
-                <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr className="bg-gray-50 border-b text-xs uppercase text-gray-500"><th className="p-4">No</th><th className="p-4">Nama</th><th className="p-4">Username</th><th className="p-4">Peran</th><th className="p-4">Sekolah</th><th className="p-4">Status</th><th className="p-4">Kelayakan Login</th></tr></thead><tbody className="divide-y text-sm">{rows.map((u,i)=>{ const teacher=DEMO_DB.teachers.find(t=>String(t.userId||'')===String(u.id||'')||String(t.id||'')===String(u.teacherId||'')); const student=DEMO_DB.students.find(st=>String(st.userId||'')===String(u.id||'')||String(st.id||'')===String(u.studentId||'')); const parent=DEMO_DB.parents.find(pa=>String(pa.userId||'')===String(u.id||'')||String(pa.id||'')===String(u.parentId||'')); const sid=u.schoolId||teacher?.schoolId||student?.schoolId||parent?.schoolId||''; return <tr key={u.id||u.username}><td className="p-4">{i+1}</td><td className="p-4 font-semibold">{u.name||'-'}</td><td className="p-4 font-mono">{u.username||u.email||'-'}</td><td className="p-4">{roleLabel[u.role]||u.role||'-'}</td><td className="p-4">{getSchoolName(sid)||'-'}</td><td className="p-4"><Badge status={u.status}/></td><td className="p-4">{aksaraAccountCanLogin(u) ? <span className="text-teal-700 font-medium">Dapat digunakan</span> : <span className="text-amber-700 font-medium">Perlu dilengkapi</span>}</td></tr>})}{!rows.length&&<tr><td colSpan="7" className="p-10 text-center text-gray-500">Belum ada pengguna yang sesuai.</td></tr>}</tbody></table></div></div></div>;
+                <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr className="bg-gray-50 border-b text-xs uppercase text-gray-500"><th className="p-4">No</th><th className="p-4">Nama</th><th className="p-4">Username</th><th className="p-4">Peran</th><th className="p-4">Sekolah</th><th className="p-4">Status</th></tr></thead><tbody className="divide-y text-sm">{rows.map((u,i)=>{ const teacher=DEMO_DB.teachers.find(t=>String(t.userId||'')===String(u.id||'')||String(t.id||'')===String(u.teacherId||'')); const student=DEMO_DB.students.find(st=>String(st.userId||'')===String(u.id||'')||String(st.id||'')===String(u.studentId||'')); const parent=DEMO_DB.parents.find(pa=>String(pa.userId||'')===String(u.id||'')||String(pa.id||'')===String(u.parentId||'')); const sid=u.schoolId||teacher?.schoolId||student?.schoolId||parent?.schoolId||''; return <tr key={u.id||u.username}><td className="p-4">{i+1}</td><td className="p-4 font-semibold">{u.name||'-'}</td><td className="p-4 font-mono">{u.username||u.email||'-'}</td><td className="p-4">{roleLabel[u.role]||u.role||'-'}</td><td className="p-4">{getSchoolName(sid)||'-'}</td><td className="p-4"><Badge status={u.status}/></td></tr>})}{!rows.length&&<tr><td colSpan="6" className="p-10 text-center text-gray-500">Belum ada pengguna yang sesuai.</td></tr>}</tbody></table></div></div></div>;
         };
 
         const AdminRouter = ({ route }) => {
