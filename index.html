@@ -569,9 +569,14 @@ var DEMO_DB = {
                             // A truly missing collection can be migrated from this device's durable cache.
                             DEMO_DB[key] = localRows;
                             missingUpdates[key] = aksaraFbMap(key, localRows);
+                        } else if (key === 'schools' && remoteRows.length === 0 && localRows.length > 0) {
+                            // Recover school master records that were previously saved only in this browser
+                            // when Firebase has an initialized-but-empty schools node. A normal delete also
+                            // clears durable local caches, so deleted schools are not intentionally restored.
+                            DEMO_DB[key] = localRows;
+                            missingUpdates[key] = aksaraFbMap(key, localRows);
                         } else {
-                            // An existing remote collection, even an empty one, is authoritative.
-                            // Never merge stale local cache into it: doing so resurrects deleted records.
+                            // Existing non-empty remote collections remain authoritative to avoid reviving stale deletions.
                             DEMO_DB[key] = remoteRows;
                         }
                     });
@@ -4870,7 +4875,7 @@ if ('serviceWorker' in navigator) {
                 persistDurableCollection('schools', updated);
                 window.dispatchEvent(new CustomEvent('aksara:schools-changed'));
                 closeModal();
-                setNotice('Data sekolah berhasil disimpan dan disinkronkan.');
+                setNotice('Data sekolah disimpan. Sinkronisasi Firebase sedang diproses.');
                 setTimeout(() => setNotice(''), 3000);
             };
             const deleteSchool = (school) => {
@@ -4880,7 +4885,7 @@ if ('serviceWorker' in navigator) {
                 setSchools(updated);
                 persistDurableCollection('schools', updated);
                 window.dispatchEvent(new CustomEvent('aksara:schools-changed'));
-                setNotice('Data sekolah berhasil dihapus dan disinkronkan.');
+                setNotice('Data sekolah dihapus. Sinkronisasi Firebase sedang diproses.');
             };
             const removeParent = (parent) => {
                 if (!window.confirm(`Hapus data orang tua/wali ${parent.name || ''}?`)) return;
@@ -5031,20 +5036,21 @@ if ('serviceWorker' in navigator) {
                 localStorage.setItem(`master_${key}`, JSON.stringify(data));
                 localStorage.setItem(`aksara_firebase_${key}`, JSON.stringify(data));
             } catch(e) {}
-            // Semua CRUD yang memakai helper ini juga harus masuk ke Firebase.
-            // Tidak mensyaratkan Firebase Auth karena database bridge aplikasi memang
-            // sudah memakai Realtime Database sebagai storage utama.
-            const write = () => {
+            // Persist through the baseline-aware bridge so writes cannot race hydration
+            // or replace a whole collection with a stale snapshot from another device.
+            const write = async () => {
                 try {
-                    if (AKSARA_FIREBASE.ready && AKSARA_FIREBASE.db && !AKSARA_FIREBASE.applying) {
-                        AKSARA_FIREBASE.db.ref(key).set(
-                            key === 'systemHealth' ? aksaraFbSafe(data) : aksaraFbMap(key, data)
-                        ).catch(err => console.warn('[AKSARA Firebase persist]', key, err));
+                    if (key === 'systemHealth') {
+                        await aksaraFbReady();
+                        if (AKSARA_FIREBASE.db && !AKSARA_FIREBASE.applying) await AKSARA_FIREBASE.db.ref(key).set(aksaraFbSafe(data));
+                        return;
                     }
-                } catch(e) {}
+                    await aksaraFbReady();
+                    if (!AKSARA_FIREBASE.started) await aksaraFbStart();
+                    if (AKSARA_FIREBASE.db && !AKSARA_FIREBASE.applying) await aksaraFbCommitCollection(key, data);
+                } catch(e) { console.warn('[AKSARA Firebase persist]', key, e); }
             };
-            if (AKSARA_FIREBASE.ready) write();
-            else aksaraFbReady().then(write).catch(()=>{});
+            write();
         };
         const aksaraFbPersistCollection = async (key, rows) => {
             const data = Array.isArray(rows) ? rows : [];
