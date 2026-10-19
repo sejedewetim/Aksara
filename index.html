@@ -5123,27 +5123,47 @@ if ('serviceWorker' in navigator) {
                     persistDurableCollection('parents', DEMO_DB.parents);
                     try { await aksaraFbPersistCollection('parents', DEMO_DB.parents); } catch (e) { console.warn('[AKSARA] sinkron parents admin', e); }
                 }
+                // LOCAL-FIRST: simpan ke perangkat segera agar formulir tidak gagal hanya karena
+                // Firebase sedang lambat/tidak tersedia. Payload tertunda disimpan untuk sinkronisasi ulang.
+                setStudents(updated);
+                DEMO_DB.students = updated;
+                DEMO_DB.users = nextUsers;
+                persistDurableCollection('students', updated);
+                persistDurableCollection('users', nextUsers);
                 try {
-                    const studentSaved = await aksaraFbPersistCollection('students', updated);
-                    if (!studentSaved) throw new Error('Firebase menolak penyimpanan data murid. Kelas belum dikunci/tersimpan di cloud.');
-                    const usersSaved = await aksaraFbPersistCollection('users', nextUsers);
-                    if (!usersSaved) throw new Error('Firebase menolak sinkronisasi akun murid. Data kelas belum dipastikan tersinkron ke akun murid.');
-                    // Commit ke memori dan cache hanya setelah penulisan cloud berhasil.
-                    setStudents(updated);
-                    DEMO_DB.students = updated;
-                    DEMO_DB.users = nextUsers;
-                    persistDurableCollection('students', updated);
-                    persistDurableCollection('users', nextUsers);
-                } catch (syncError) {
-                    console.error('[AKSARA] Gagal menyimpan kelas murid ke Firebase', syncError);
-                    setError((syncError?.message || 'Gagal menyimpan data ke Firebase.') + ' Periksa koneksi dan izin Firebase, lalu coba Simpan Murid lagi.');
-                    return;
-                }
+                    localStorage.setItem('aksara_pending_student_cloud_sync', JSON.stringify({
+                        students: updated, users: nextUsers, savedAt: new Date().toISOString()
+                    }));
+                } catch (e) {}
                 window.dispatchEvent(new Event('aksara:students-changed'));
                 window.dispatchEvent(new Event('aksara:users-changed'));
                 closeModal();
-                setNotice(editingId ? 'Data murid dan kunci kelas berhasil disimpan ke Firebase serta disinkronkan ke akun murid.' : 'Murid dan kunci kelas berhasil disimpan ke Firebase.');
-                setTimeout(() => setNotice(''), 3000);
+                setNotice(editingId
+                    ? 'Data murid dan kunci kelas tersimpan di perangkat. Sinkronisasi cloud sedang dicoba di latar belakang.'
+                    : 'Data murid dan kunci kelas tersimpan di perangkat. Sinkronisasi cloud sedang dicoba di latar belakang.');
+                // Sinkronisasi cloud berjalan setelah UI selesai; kegagalan cloud tidak membatalkan
+                // penyimpanan lokal. Statusnya dibedakan supaya tidak mengklaim cloud sudah tersimpan.
+                (async () => {
+                    let lastError = null;
+                    for (let attempt = 0; attempt < 3; attempt++) {
+                        try {
+                            const studentSaved = await aksaraFbPersistCollection('students', updated);
+                            const usersSaved = await aksaraFbPersistCollection('users', nextUsers);
+                            if (studentSaved && usersSaved) {
+                                try { localStorage.removeItem('aksara_pending_student_cloud_sync'); } catch (e) {}
+                                setNotice('Data murid tersimpan dan berhasil disinkronkan ke Firebase serta akun murid.');
+                                setTimeout(() => setNotice(''), 3500);
+                                return;
+                            }
+                            lastError = new Error('Firebase belum menerima perubahan. Data lokal tetap tersimpan dan menunggu sinkronisasi.');
+                        } catch (err) { lastError = err; }
+                        await new Promise(resolve => setTimeout(resolve, 1200 * (attempt + 1)));
+                    }
+                    console.warn('[AKSARA] Sinkronisasi cloud murid tertunda; data lokal dipertahankan.', lastError);
+                    setNotice('Data tersimpan di perangkat ini, tetapi belum tersinkron ke cloud. Periksa koneksi/izin Firebase; perubahan belum tentu terlihat di perangkat lain.');
+                    setTimeout(() => setNotice(''), 6000);
+                })();
+                setTimeout(() => setNotice(''), 6000);
             };
             const filteredStudents = students.filter(s => !selectedSchool || String(s.schoolId || s.sekolahId || '') === String(selectedSchool)).filter(s => {
                 const cls = DEMO_DB.classes.find(c => c.id === s.classId);
