@@ -7129,63 +7129,85 @@ if ('serviceWorker' in navigator) {
                 });
                 return [...map.values()];
             };
-            const load = React.useCallback(() => {
+            const load = React.useCallback(async () => {
                 try {
                     setError('');
                     const teacher = getTeacherForUser(user) || {};
                     const schoolId = String(teacher.schoolId || teacher.sekolahId || user?.schoolId || user?.sekolahId || '').trim();
-                    const schoolName = norm(teacher.schoolName || user?.schoolName || user?.sekolahName || '');
-                    const teacherClassIds = new Set();
-                    const teacherClassNames = new Set();
-                    [teacher.classId, teacher.kelasId].filter(Boolean).forEach(v => teacherClassIds.add(String(v).trim()));
-                    [...(teacher.classIds || []), ...(teacher.kelasIds || [])].filter(Boolean).forEach(v => teacherClassIds.add(String(v).trim()));
-                    [teacher.className, teacher.kelasNama].filter(Boolean).forEach(v => teacherClassNames.add(norm(v)));
-                    [...(teacher.classNames || []), ...(teacher.kelas || [])].filter(Boolean).forEach(v => teacherClassNames.add(norm(v)));
+                    const schoolName = norm(teacher.schoolName || teacher.sekolahName || user?.schoolName || user?.sekolahName || '');
 
-                    const raw = [
-                        ...(Array.isArray(DEMO_DB.examSchedules) ? DEMO_DB.examSchedules : []),
-                        ...readLocal('aksara_examSchedules'),
-                        ...readLocal('firebase_examSchedules'),
-                        ...readLocal('master_examSchedules')
-                    ];
-                    const rows = uniqueById(raw).filter(schedule => {
-                        const status = String(schedule.status || schedule.publishStatus || '').toUpperCase();
-                        if (!['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(status)) return false;
+                    // Firebase menjadi sumber utama agar jadwal yang dibuat Admin Super sama
+                    // dengan yang dibaca guru pada perangkat lain. Cache lokal hanya fallback
+                    // ketika Firebase benar-benar tidak dapat diakses.
+                    let raw = [];
+                    let firebaseReadOk = false;
+                    try {
+                        await aksaraFbReady();
+                        const snap = await AKSARA_FIREBASE.db.ref('examSchedules').once('value');
+                        const cloud = snap.val();
+                        raw = Array.isArray(cloud) ? cloud : (cloud && typeof cloud === 'object' ? Object.values(cloud) : []);
+                        firebaseReadOk = true;
+                    } catch (firebaseError) {
+                        console.warn('[AKSARA] Jadwal Firebase guru gagal dibaca; memakai cache sementara.', firebaseError);
+                    }
+                    if (!firebaseReadOk) {
+                        raw = [
+                            ...(Array.isArray(DEMO_DB.examSchedules) ? DEMO_DB.examSchedules : []),
+                            ...readLocal('aksara_examSchedules'),
+                            ...readLocal('firebase_examSchedules'),
+                            ...readLocal('master_examSchedules')
+                        ];
+                    }
 
-                        const scheduleSchool = String(schedule.schoolId || schedule.sekolahId || '').trim();
+                    const cloudRows = uniqueById(raw).map(schedule => {
+                        const id = String(schedule.scheduleId || schedule.id || schedule.schedule_id || '').trim();
+                        const version = Math.max(1, Number(schedule.tokenVersion) || 1);
+                        const canonical = typeof normalizeScheduleRecord === 'function'
+                            ? normalizeScheduleRecord({ ...schedule, id, scheduleId: id, tokenVersion: version })
+                            : { ...schedule, id, scheduleId: id, tokenVersion: version };
+                        return {
+                            ...canonical,
+                            id,
+                            scheduleId: id,
+                            packageName: String(canonical.packageName || canonical.examName || canonical.name || '').trim() || 'Paket Ujian',
+                            // Token guru selalu dihitung dengan fungsi dan versi yang sama
+                            // seperti token pada Admin Super, tidak membuat token baru sendiri.
+                            token: makeExamToken(id, version),
+                            tokenVersion: version
+                        };
+                    }).filter(schedule => schedule.id);
+
+                    const rows = cloudRows.filter(schedule => {
+                        const scheduleSchool = String(schedule.schoolId || schedule.sekolahId || schedule.school_id || '').trim();
                         const scheduleSchoolName = norm(schedule.schoolName || schedule.sekolahName || '');
                         const schoolIds = Array.isArray(schedule.schoolIds) ? schedule.schoolIds.map(v => String(v).trim()) : [];
                         const allSchools = norm(schedule.schoolScope) === 'all' || scheduleSchool.toUpperCase() === 'ALL' || schoolIds.includes('ALL');
-                        const schoolOk = allSchools || !schoolId || scheduleSchool === schoolId || schoolIds.includes(schoolId) || (!!schoolName && !!scheduleSchoolName && schoolName === scheduleSchoolName);
-                        if (!schoolOk) return false;
-
-                        const targets = [
-                            ...(Array.isArray(schedule.targetClassIds) ? schedule.targetClassIds : []),
-                            ...(Array.isArray(schedule.classIds) ? schedule.classIds : []),
-                            ...(schedule.classId ? [schedule.classId] : [])
-                        ].map(v => String(v || '').trim()).filter(Boolean);
-                        const targetNames = [
-                            ...(Array.isArray(schedule.targetClassNames) ? schedule.targetClassNames : []),
-                            ...(Array.isArray(schedule.classNames) ? schedule.classNames : []),
-                            ...(schedule.className ? [schedule.className] : [])
-                        ].map(norm).filter(Boolean);
-                        const scope = norm(schedule.targetScope);
-                        const allClasses = scope === 'all' || (!targets.length && !targetNames.length);
-                        const classOk = allClasses || targets.some(id => teacherClassIds.has(id)) || targetNames.some(name => teacherClassNames.has(name));
-
-                        // Jika Guru belum memiliki penugasan classId, sekolah yang sama tetap menjadi dasar
-                        // sehingga jadwal sekolah tersebut tetap dapat dilihat Guru.
-                        return classOk || (teacherClassIds.size === 0 && teacherClassNames.size === 0);
-                    }).map(schedule => ({
-                        ...schedule,
-                        id: schedule.id || schedule.scheduleId,
-                        packageName: String(schedule.packageName || schedule.examName || schedule.name || '').trim() || 'Paket Ujian',
-                        token: makeExamToken(schedule.scheduleId || schedule.id, Math.max(1, Number(schedule.tokenVersion) || 1)),
-                        tokenVersion: Math.max(1, Number(schedule.tokenVersion) || 1)
-                    }));
+                        const schoolOk = allSchools || !schoolId || !scheduleSchool || scheduleSchool === schoolId || schoolIds.includes(schoolId) || (!!schoolName && !!scheduleSchoolName && schoolName === scheduleSchoolName);
+                        // Tampilkan jadwal sekolah guru walaupun metadata penugasan kelas di salah
+                        // satu rekaman belum seragam. Pembatasan akses ujian tetap divalidasi
+                        // pada saat murid memasukkan token.
+                        return schoolOk;
+                    }).sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
 
                     setSchedules(rows);
-                    DEMO_DB.examSchedules = uniqueById([...(DEMO_DB.examSchedules || []), ...rows]);
+                    // Jangan menggabungkan cache lama kembali ke data Firebase karena bisa
+                    // menghidupkan jadwal yang telah dihapus atau token versi yang sudah usang.
+                    if (firebaseReadOk) {
+                        DEMO_DB.examSchedules = rows.map(({ token: _token, ...schedule }) => ({ ...schedule, token: makeExamToken(schedule.scheduleId || schedule.id, Math.max(1, Number(schedule.tokenVersion) || 1)) }));
+                        try {
+                            localStorage.setItem('aksara_examSchedules', JSON.stringify(DEMO_DB.examSchedules));
+                            localStorage.setItem('master_examSchedules', JSON.stringify(DEMO_DB.examSchedules));
+                            localStorage.setItem('aksara_firebase_examSchedules', JSON.stringify(DEMO_DB.examSchedules));
+                        } catch (e) {}
+                    }
+                    if (firebaseReadOk && rows.length === 0) {
+                        const localCount = [
+                            ...readLocal('aksara_examSchedules'),
+                            ...readLocal('firebase_examSchedules'),
+                            ...readLocal('master_examSchedules')
+                        ].length;
+                        if (localCount > 0) setError('Jadwal ada di cache perangkat ini, tetapi belum ditemukan pada Firebase. Buka Jadwal Ujian di Admin Super, simpan ulang jadwal, lalu tekan Refresh.');
+                    }
                 } catch (e) {
                     console.error('[AKSARA] Guru schedules render/load error:', e);
                     setSchedules([]);
