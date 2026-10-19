@@ -4889,7 +4889,11 @@ if ('serviceWorker' in navigator) {
                 .map(u => ({ ...u }));
             const normalize = (s, fallback = {}) => {
                 const merged = { ...fallback, ...s };
-                const classValue = merged.className || merged.class || merged.classId || merged.kelas || merged.kelasId || '';
+                // Utamakan kunci kelas permanen; nama kelas hanya fallback agar snapshot nama lama
+                // tidak menimpa classId yang benar saat data students dan users digabungkan.
+                const classValue = merged.classId || merged.kelasId || merged.studentClassId || merged.rombelId || merged.className || merged.class || merged.kelas || '';
+                const normalizedClassId = typeof normalizeStudentClassValue === 'function' ? (normalizeStudentClassValue(classValue) || String(classValue || '').trim()) : String(classValue || '').trim();
+                const classLabel = merged.className || merged.kelas || merged.namaKelas || (typeof studentClassLabel === 'function' ? studentClassLabel(normalizedClassId) : '') || normalizedClassId;
                 const schoolId = merged.schoolId || merged.sekolahId || '';
                 return { ...merged,
                     id: merged.studentId || merged.id || merged.userId || `STD-${merged.nisn || merged.username || Date.now()}-${Math.random().toString(36).slice(2,7)}`,
@@ -4898,7 +4902,7 @@ if ('serviceWorker' in navigator) {
                     name: merged.name || merged.nama || merged.fullName || merged.username || 'Murid',
                     nisn: merged.nisn || merged.nis || '',
                     schoolId, schoolName: merged.schoolName || merged.sekolahName || merged.asalSekolah || getSchoolName(schoolId),
-                    classId: classValue, className: classValue,
+                    classId: normalizedClassId, kelasId: normalizedClassId, className: classLabel, kelas: classLabel,
                     gender: merged.gender || merged.jenisKelamin || merged.genderName || '-',
                     status: merged.status || 'ACTIVE',
                     username: merged.username || '', password: merged.password || ''
@@ -5099,10 +5103,8 @@ if ('serviceWorker' in navigator) {
                     studentMap.set(key, old ? { ...old, ...s, id: next.nisn.toLowerCase() === key ? canonicalId : (old.id || s.id), studentId: next.nisn.toLowerCase() === key ? (next.studentId || canonicalId) : (old.studentId || s.studentId) } : { ...s });
                 });
                 const updated = [...studentMap.values()].map(s => String(s.nisn ?? s.nis ?? '').trim().toLowerCase() === normNisn ? next : s);
-                setStudents(updated);
-                DEMO_DB.students = updated;
-                persistDurableCollection('students', updated);
-                try { await aksaraFbPersistCollection('students', updated); } catch (e) { console.warn('[AKSARA] sinkron students admin', e); }
+                // Jangan menutup form atau menganggap tersimpan sebelum Firebase mengonfirmasi penulisan.
+                // Perubahan UI/cache baru diterapkan setelah students dan users berhasil tersinkron.
                 // Satu murid = satu akun. Cari akun lama berdasarkan studentId, NISN, atau username sebelum membuat/mengganti.
                 const oldUser = mergeCollectionRecords('users').find(u => String(u.studentId || '') === String(next.studentId) || String(u.nisn || u.nis || '').trim() === nisn || String(u.username || '').trim().toLowerCase() === String(next.username || '').trim().toLowerCase());
                 const studentUser = { ...(oldUser || {}), id: oldUser?.id || next.userId || `USR-STU-${next.studentId}`, userId: oldUser?.userId || next.userId || oldUser?.id || `USR-STU-${next.studentId}`, studentId: next.studentId, nisn: next.nisn, username: next.username, password: next.password, name: next.name, schoolId: next.schoolId, schoolName: next.schoolName, classId: next.classId, kelasId: next.classId, className: next.className, kelas: next.className, gender: next.gender, jenisKelamin: next.jenisKelamin, role: 'MURID', status: next.status || 'ACTIVE' };
@@ -5113,8 +5115,7 @@ if ('serviceWorker' in navigator) {
                     if (!same) userMap.set(String(u.id || u.userId || u.username || Math.random()), u);
                 });
                 userMap.set(String(studentUser.id), studentUser);
-                DEMO_DB.users = [...userMap.values()];
-                persistDurableCollection('users', DEMO_DB.users);
+                const nextUsers = [...userMap.values()];
                 let parent = DEMO_DB.parents.find(p => String(p.studentId || '') === String(next.studentId) || String(p.studentNisn || '').trim() === nisn);
                 if (parentName) {
                     const parentNext = { ...(parent || {}), id: parent?.id || `PAR-${Date.now()}`, studentId: next.studentId, studentNisn: next.nisn, name: parentName, status: form.status, username: parent?.username || `OT-${next.nisn}`, password: parent?.password || `OT-${next.nisn}`, relationship: parent?.relationship || 'WALI' };
@@ -5122,10 +5123,26 @@ if ('serviceWorker' in navigator) {
                     persistDurableCollection('parents', DEMO_DB.parents);
                     try { await aksaraFbPersistCollection('parents', DEMO_DB.parents); } catch (e) { console.warn('[AKSARA] sinkron parents admin', e); }
                 }
-                try { await aksaraFbPersistCollection('users', DEMO_DB.users); } catch (e) { console.warn('[AKSARA] sinkron users admin', e); }
+                try {
+                    const studentSaved = await aksaraFbPersistCollection('students', updated);
+                    if (!studentSaved) throw new Error('Firebase menolak penyimpanan data murid. Kelas belum dikunci/tersimpan di cloud.');
+                    const usersSaved = await aksaraFbPersistCollection('users', nextUsers);
+                    if (!usersSaved) throw new Error('Firebase menolak sinkronisasi akun murid. Data kelas belum dipastikan tersinkron ke akun murid.');
+                    // Commit ke memori dan cache hanya setelah penulisan cloud berhasil.
+                    setStudents(updated);
+                    DEMO_DB.students = updated;
+                    DEMO_DB.users = nextUsers;
+                    persistDurableCollection('students', updated);
+                    persistDurableCollection('users', nextUsers);
+                } catch (syncError) {
+                    console.error('[AKSARA] Gagal menyimpan kelas murid ke Firebase', syncError);
+                    setError((syncError?.message || 'Gagal menyimpan data ke Firebase.') + ' Periksa koneksi dan izin Firebase, lalu coba Simpan Murid lagi.');
+                    return;
+                }
                 window.dispatchEvent(new Event('aksara:students-changed'));
+                window.dispatchEvent(new Event('aksara:users-changed'));
                 closeModal();
-                setNotice(editingId ? 'Data murid berhasil diperbarui tanpa membuat akun ganda.' : 'Murid berhasil ditambahkan.');
+                setNotice(editingId ? 'Data murid dan kunci kelas berhasil disimpan ke Firebase serta disinkronkan ke akun murid.' : 'Murid dan kunci kelas berhasil disimpan ke Firebase.');
                 setTimeout(() => setNotice(''), 3000);
             };
             const filteredStudents = students.filter(s => !selectedSchool || String(s.schoolId || s.sekolahId || '') === String(selectedSchool)).filter(s => {
