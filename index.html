@@ -3571,9 +3571,14 @@ if ('serviceWorker' in navigator) {
             const teacherId = String(teacher?.teacherId || teacher?.guruId || teacher?.id || '').trim();
             const schoolRefName = String(teacher?.schoolName || teacher?.sekolahName || user?.schoolName || user?.sekolahName || '').trim();
             const schoolFromName = !teacher?.schoolId && !teacher?.sekolahId && !user?.schoolId && !user?.sekolahId && schoolRefName ? getRegisteredSchools().find(s => String(s?.name || s?.schoolName || s?.namaSekolah || '').trim().toLowerCase().replace(/\s+/g,' ') === schoolRefName.toLowerCase().replace(/\s+/g,' ')) : null;
-            const schoolId = String(teacher?.schoolId || teacher?.sekolahId || user?.schoolId || user?.sekolahId || schoolFromName?.id || '').trim();
+            const rawSchoolId = String(teacher?.schoolId || teacher?.sekolahId || user?.schoolId || user?.sekolahId || schoolFromName?.id || '').trim();
+            const schoolRecords = typeof getRegisteredSchools === 'function' ? getRegisteredSchools() : (DEMO_DB.schools || []);
+            const schoolAliases = record => [record?.id, record?.schoolId, record?.sekolahId, record?.kodeSekolah, record?.npsn].map(v => String(v ?? '').trim()).filter(Boolean);
+            const schoolRecord = schoolRecords.find(record => schoolAliases(record).includes(rawSchoolId)) || schoolRecords.find(record => String(record?.name || record?.schoolName || record?.namaSekolah || '').trim().toLowerCase().replace(/\s+/g,' ') === schoolRefName.toLowerCase().replace(/\s+/g,' '));
+            const schoolId = String(schoolRecord?.id || schoolRecord?.schoolId || schoolRecord?.sekolahId || rawSchoolId).trim();
+            const canonicalSchool = value => { const raw = String(value ?? '').trim(); if (!raw) return ''; const found = schoolRecords.find(record => schoolAliases(record).includes(raw)); return String(found?.id || found?.schoolId || found?.sekolahId || raw).trim(); };
             const normalizeName = value => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
-            const normalizeClass = value => normalizeStudentClassValue(value);
+            const normalizeClass = value => canonicalTeacherClassId(value) || normalizeStudentClassValue(value);
             const explicitClassIds = new Set(canonicalTeacherClassList(teacher));
             const explicitClassNames = new Set([...explicitClassIds].map(normalizeClass));
 
@@ -3603,9 +3608,9 @@ if ('serviceWorker' in navigator) {
             const classNames = new Set(classes.map(c => normalizeClass(c.className || c.name)).filter(Boolean));
             const allStudents = getRegisteredStudents();
             const students = allStudents.filter(s => {
-                const sSchool = String(s?.schoolId || s?.sekolahId || '').trim();
-                const sClass = normalizeClass(s?.classId || s?.kelasId || s?.className || s?.kelas || s?.namaKelas || '');
-                return (!schoolId || sSchool === schoolId) && String(s?.status || 'ACTIVE').toUpperCase() !== 'INACTIVE' && (!classes.length || classIds.has(sClass) || classNames.has(sClass));
+                const sSchool = canonicalSchool(s?.schoolId || s?.sekolahId || s?.school_id || s?.schoolKey || '');
+                const sClass = normalizeClass(s?.classId || s?.kelasId || s?.studentClassId || s?.rombelId || s?.className || s?.kelas || s?.namaKelas || '');
+                return (!schoolId || sSchool === schoolId) && String(s?.status || 'ACTIVE').toUpperCase() !== 'INACTIVE' && classIds.size > 0 && (classIds.has(sClass) || classNames.has(sClass));
             });
             return { classes, students };
         };
@@ -7400,8 +7405,14 @@ if ('serviceWorker' in navigator) {
             const { user, setRoute } = React.useContext(AppContext);
             const teacher = getTeacherForUser(user);
             const assigned = getTeacherAssignments(teacher, user);
-            const schoolId = String(teacher?.schoolId || user?.schoolId || '').trim();
-            const assignedClassIds = new Set((assigned.classes || []).map(c => String(c.id || c.classId || '').trim()).filter(Boolean));
+            const rawSchoolId = String(teacher?.schoolId || teacher?.sekolahId || user?.schoolId || user?.sekolahId || '').trim();
+            const registeredSchools = typeof getRegisteredSchools === 'function' ? getRegisteredSchools() : (DEMO_DB.schools || []);
+            const schoolAliases = record => [record?.id, record?.schoolId, record?.sekolahId, record?.kodeSekolah, record?.npsn].map(v => String(v ?? '').trim()).filter(Boolean);
+            const schoolRecord = registeredSchools.find(record => schoolAliases(record).includes(rawSchoolId)) || registeredSchools.find(record => String(record?.name || record?.schoolName || record?.namaSekolah || '').trim().toLowerCase() === String(teacher?.schoolName || teacher?.sekolahName || user?.schoolName || user?.sekolahName || '').trim().toLowerCase());
+            const schoolId = String(schoolRecord?.id || schoolRecord?.schoolId || schoolRecord?.sekolahId || rawSchoolId).trim();
+            const canonicalSchool = value => { const raw = String(value ?? '').trim(); if (!raw) return ''; const found = registeredSchools.find(record => schoolAliases(record).includes(raw)); return String(found?.id || found?.schoolId || found?.sekolahId || raw).trim(); };
+            const classKey = value => canonicalTeacherClassId(value) || normalizeStudentClassValue(value);
+            const assignedClassIds = new Set((assigned.classes || []).map(c => classKey(c.id || c.classId || c.className || '')).filter(Boolean));
             const [version,setVersion]=React.useState(0);
             const [query,setQuery]=React.useState('');
             const [classId,setClassId]=React.useState('');
@@ -7416,8 +7427,8 @@ if ('serviceWorker' in navigator) {
             const [form,setForm]=React.useState({name:'',nisn:'',schoolId:'',classId:'',username:'',password:'',parentName:'',status:'ACTIVE'});
             const refresh=()=>setVersion(v=>v+1);
             React.useEffect(()=>{const fn=()=>refresh();window.addEventListener('aksara:firebase-changed',fn);window.addEventListener('aksara:students-changed',fn);window.addEventListener('storage',fn);return()=>{window.removeEventListener('aksara:firebase-changed',fn);window.removeEventListener('aksara:students-changed',fn);window.removeEventListener('storage',fn)}},[]);
-            const allStudents = React.useMemo(()=>mergeCollectionRecords('students').filter(s=>String(s.schoolId||s.sekolahId||'')===schoolId && (!assignedClassIds.size || assignedClassIds.has(String(s.classId||s.kelasId||''))),[version,schoolId,assignedClassIds.size]));
-            const students=allStudents.filter(s=>(!classId||String(s.classId||s.kelasId||'')===classId)&&(!query||`${s.name||''} ${s.nisn||''} ${s.username||''}`.toLowerCase().includes(query.toLowerCase()))).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
+            const allStudents = React.useMemo(()=>getRegisteredStudents().filter(s=>canonicalSchool(s.schoolId||s.sekolahId||s.school_id||s.schoolKey||'')===schoolId && String(s.status||'ACTIVE').toUpperCase()!=='INACTIVE' && assignedClassIds.size>0 && assignedClassIds.has(classKey(s.classId||s.kelasId||s.studentClassId||s.rombelId||s.className||s.kelas||''))),[version,schoolId,assignedClassIds.size]);
+            const students=allStudents.filter(s=>(!classId||classKey(s.classId||s.kelasId||s.studentClassId||s.rombelId||s.className||'')===classKey(classId))&&(!query||`${s.name||''} ${s.nisn||''} ${s.username||''}`.toLowerCase().includes(query.toLowerCase()))).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
             const openNew=()=>{setEditingId(null);setError('');setForm({name:'',nisn:'',schoolId,classId:classId||String(assigned.classes?.[0]?.id||''),username:'',password:'',parentName:'',status:'ACTIVE'});setModal('form')};
             const openEdit=s=>{setEditingId(s.id);setError('');setForm({name:s.name||'',nisn:s.nisn||s.nis||'',schoolId:s.schoolId||schoolId,classId:s.classId||s.kelasId||'',username:s.username||'',password:s.password||'',parentName:s.parentName||'',status:s.status||'ACTIVE'});setModal('form')};
             const save=async e=>{e.preventDefault();setError('');const name=form.name.trim(),nisn=String(form.nisn||'').trim(),sid=String(form.schoolId||schoolId).trim(),cid=String(form.classId||'').trim();if(!name||!nisn)return setError('Nama dan NISN wajib diisi.');if(sid!==schoolId)return setError('Guru hanya dapat mengelola murid pada sekolahnya sendiri.');if(!cid||!assignedClassIds.has(cid))return setError('Kelas harus merupakan kelas yang ditugaskan kepada akun Guru.');if(allStudents.some(s=>s.id!==editingId&&String(s.nisn||'').trim()===nisn))return setError('NISN sudah digunakan pada sekolah ini.');const old=allStudents.find(s=>s.id===editingId)||{};const student={...old,id:editingId||`STD-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,userId:old.userId||`USR-STU-${Date.now()}`,studentId:old.studentId||editingId||`STD-${Date.now()}`,name,nisn,schoolId:sid,schoolName:getSchoolName(sid),classId:cid,className:(assigned.classes||[]).find(c=>String(c.id)===cid)?.name||cid,parentName:String(form.parentName||'').trim(),username:String(form.username||nisn).trim(),password:String(form.password||nisn),status:form.status||'ACTIVE',updatedBy:user?.id,updatedByRole:'GURU',updatedAt:new Date().toISOString()};const current=mergeCollectionRecords('students');const next=editingId?current.map(s=>s.id===editingId?student:s):[...current,student];DEMO_DB.students=next;persistDurableCollection('students',next);try{await aksaraFbPersistCollection('students',next);if(typeof upsertStudentAccount==='function')await upsertStudentAccount(student);}catch(err){console.warn('[AKSARA] sinkron murid guru',err)};window.dispatchEvent(new Event('aksara:students-changed'));setModal(null);setNotice(editingId?'Data murid diperbarui dan disinkronkan ke Admin Super.':'Murid ditambahkan dan langsung tersedia pada Data Admin Super.');setTimeout(()=>setNotice(''),3500)};
