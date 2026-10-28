@@ -3617,15 +3617,26 @@ if ('serviceWorker' in navigator) {
             const classNames = new Set(classes.map(c => normalizeClass(c.className || c.name)).filter(Boolean));
             const allStudents = getRegisteredStudents();
             const students = allStudents.filter(s => {
-                const rawStudentSchool = s?.schoolId || s?.sekolahId || s?.school_id || s?.schoolKey || '';
-                const sSchool = canonicalSchool(rawStudentSchool);
-                const schoolMatches = !schoolId || sSchool === schoolId || sameSchoolIdentity(rawStudentSchool, schoolId) ||
-                    (schoolRefName && normalizeName(s?.schoolName || s?.sekolahName || s?.asalSekolah) === normalizeName(schoolRefName));
-                const rawStudentClass = s?.classId || s?.kelasId || s?.studentClassId || s?.rombelId || s?.className || s?.class || s?.kelas || s?.namaKelas || '';
-                const sClass = normalizeClass(rawStudentClass);
-                const classMatches = classIds.has(sClass) || classNames.has(sClass) || [...classIds].some(cid => sameClassIdentity(cid, rawStudentClass));
+                // Periksa seluruh variasi kunci sekolah; jangan bergantung pada satu alias saja.
+                const rawSchoolValues = [s?.schoolId, s?.sekolahId, s?.school_id, s?.schoolKey, s?.kodeSekolah, s?.npsn]
+                    .map(v => String(v ?? '').trim()).filter(Boolean);
+                const studentSchoolName = normalizeName(s?.schoolName || s?.sekolahName || s?.asalSekolah || s?.namaSekolah);
+                const schoolMatches = !schoolId || rawSchoolValues.some(value =>
+                    canonicalSchool(value) === schoolId || sameSchoolIdentity(value, schoolId)
+                ) || (!!schoolRefName && studentSchoolName === normalizeName(schoolRefName));
+
+                // classId bisa berupa ID lama/nonbaku, sedangkan className/kelas berisi label yang benar.
+                // Cocokkan semuanya agar ID yang tidak dikenal tidak menutupi nama kelas yang valid.
+                const rawStudentClasses = [s?.classId, s?.kelasId, s?.studentClassId, s?.rombelId,
+                    s?.className, s?.class, s?.kelas, s?.namaKelas, s?.rombelName]
+                    .map(v => String(v ?? '').trim()).filter(Boolean);
+                const normalizedStudentClasses = rawStudentClasses.map(normalizeClass).filter(Boolean);
+                const classMatches = classIds.size > 0 && (
+                    normalizedStudentClasses.some(value => classIds.has(value) || classNames.has(value)) ||
+                    [...classIds].some(cid => rawStudentClasses.some(value => sameClassIdentity(cid, value)))
+                );
                 const status = String(s?.status || 'ACTIVE').trim().toUpperCase();
-                return schoolMatches && !['INACTIVE','NONAKTIF','SUSPENDED','DISABLED','DELETED'].includes(status) && classIds.size > 0 && classMatches;
+                return schoolMatches && !['INACTIVE','NONAKTIF','SUSPENDED','DISABLED','DELETED'].includes(status) && classMatches;
             });
             return { classes, students };
         };
@@ -7443,17 +7454,17 @@ if ('serviceWorker' in navigator) {
             const refresh=()=>setVersion(v=>v+1);
             React.useEffect(()=>{const fn=()=>refresh();window.addEventListener('aksara:firebase-changed',fn);window.addEventListener('aksara:students-changed',fn);window.addEventListener('aksara:classes-changed',fn);window.addEventListener('aksara:schools-changed',fn);window.addEventListener('storage',fn);const timer=window.setInterval(fn,5000);return()=>{window.clearInterval(timer);window.removeEventListener('aksara:firebase-changed',fn);window.removeEventListener('aksara:students-changed',fn);window.removeEventListener('aksara:classes-changed',fn);window.removeEventListener('aksara:schools-changed',fn);window.removeEventListener('storage',fn)}},[]);
             const allStudents = React.useMemo(()=>getRegisteredStudents().filter(s=>{
-                const rawSid=s.schoolId||s.sekolahId||s.school_id||s.schoolKey||'';
-                const sid=canonicalSchool(rawSid);
-                const selectedName=String(schoolRecord?.name||schoolRecord?.schoolName||schoolRecord?.namaSekolah||teacher?.schoolName||'').trim().toLowerCase().replace(/\s+/g,' ');
-                const studentName=String(s.schoolName||s.sekolahName||s.asalSekolah||'').trim().toLowerCase().replace(/\s+/g,' ');
-                const sameSchool= sid===schoolId || sameSchoolIdentity(rawSid,schoolId) || (!rawSid && selectedName && studentName===selectedName);
-                const rawCid=s.classId||s.kelasId||s.studentClassId||s.rombelId||s.className||s.class||s.kelas||s.namaKelas||'';
-                const cid=classKey(rawCid);
-                const classMatches=assignedClassIds.size>0 && (assignedClassIds.has(cid)||[...assignedClassIds].some(id=>sameClassIdentity(id,rawCid)));
+                const schoolValues=[s.schoolId,s.sekolahId,s.school_id,s.schoolKey,s.kodeSekolah,s.npsn].map(v=>String(v??'').trim()).filter(Boolean);
+                const selectedName=String(schoolRecord?.name||schoolRecord?.schoolName||schoolRecord?.namaSekolah||teacher?.schoolName||teacher?.sekolahName||'').trim().toLowerCase().replace(/\s+/g,' ');
+                const studentName=String(s.schoolName||s.sekolahName||s.asalSekolah||s.namaSekolah||'').trim().toLowerCase().replace(/\s+/g,' ');
+                const sameSchool=(!schoolId && !schoolValues.length && selectedName && studentName===selectedName) || schoolValues.some(value=>canonicalSchool(value)===schoolId||sameSchoolIdentity(value,schoolId)) || (!!selectedName && studentName===selectedName);
+                // Jangan hanya membaca classId: bila ID lama tidak dikenali, nama kelas bisa tetap valid.
+                const rawClasses=[s.classId,s.kelasId,s.studentClassId,s.rombelId,s.className,s.class,s.kelas,s.namaKelas,s.rombelName].map(v=>String(v??'').trim()).filter(Boolean);
+                const normalizedClasses=rawClasses.map(classKey).filter(Boolean);
+                const classMatches=assignedClassIds.size>0 && (normalizedClasses.some(cid=>assignedClassIds.has(cid)) || [...assignedClassIds].some(id=>rawClasses.some(raw=>sameClassIdentity(id,raw))));
                 const status=String(s.status||'ACTIVE').trim().toUpperCase();
                 return sameSchool && !['INACTIVE','NONAKTIF','SUSPENDED','DISABLED','DELETED'].includes(status) && classMatches;
-            }),[version,schoolId,assignedClassIds.size,teacher?.schoolName,schoolRecord?.name]);
+            }),[version,schoolId,assignedClassIds.size,teacher?.schoolName,teacher?.sekolahName,schoolRecord?.name]);
             const students=allStudents.filter(s=>(!classId||classKey(s.classId||s.kelasId||s.studentClassId||s.rombelId||s.className||'')===classKey(classId))&&(!query||`${s.name||''} ${s.nisn||''} ${s.username||''}`.toLowerCase().includes(query.toLowerCase()))).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
             const openNew=()=>{setEditingId(null);setError('');setForm({name:'',nisn:'',schoolId,classId:classId||String(assigned.classes?.[0]?.id||''),username:'',password:'',parentName:'',status:'ACTIVE'});setModal('form')};
             const openEdit=s=>{setEditingId(s.id);setError('');setForm({name:s.name||'',nisn:s.nisn||s.nis||'',schoolId:s.schoolId||schoolId,classId:s.classId||s.kelasId||'',username:s.username||'',password:s.password||'',parentName:s.parentName||'',status:s.status||'ACTIVE'});setModal('form')};
