@@ -3393,8 +3393,12 @@ if ('serviceWorker' in navigator) {
             return {...record,id:studentId||record.id,studentId,schoolId:school?.id||schoolId,classId,rombelId:classId,schoolName:record.schoolName||record.sekolahName||record.asalSekolah||school?.name||school?.schoolName||school?.namaSekolah||'',className:record.className||record.rombelName||record.kelasName||cls?.name||cls?.className||(typeof resolveClassDisplay==='function'?resolveClassDisplay(classId,school?.id||schoolId):'')||'',relationStatus:!!school&&!!schoolId&&!!classId&&classExistsOrCanonical&&sameSchool&&(!cls||classSchoolMatches(cls))?'LINKED':'UNLINKED'};
         };
         const readPersistentStudents = () => {
+            // Firebase menjadi sumber kebenaran setelah realtime aktif; cache lokal
+            // hanya menjadi fallback saat aplikasi belum tersambung ke cloud.
             let records = DEMO_DB.students || [];
-            try { const stored = JSON.parse(localStorage.getItem('aksara_students') || 'null'); if (Array.isArray(stored)) records = stored; } catch (e) {}
+            if (!AKSARA_FIREBASE?.started) {
+                try { const stored = JSON.parse(localStorage.getItem('aksara_students') || 'null'); if (Array.isArray(stored)) records = stored; } catch (e) {}
+            }
             const byId = new Map(); records.map(normalizeStudentProfile).filter(item => item.studentId).forEach(item => byId.set(String(item.studentId), item));
             const normalized = [...byId.values()]; DEMO_DB.students = normalized; return normalized;
         };
@@ -4800,6 +4804,10 @@ if ('serviceWorker' in navigator) {
         };
         const mergeCollectionRecords = (key) => {
             const primary = normalizeCollectionArray(DEMO_DB[key]);
+            // Setelah listener Firebase aktif, DEMO_DB merupakan snapshot otoritatif.
+            // Jangan gabungkan cache perangkat karena cache yang tertinggal dapat
+            // menghidupkan kembali record yang sudah dihapus dari cloud.
+            if (AKSARA_FIREBASE?.started) return primary.map(item => ({ ...item }));
             const local = readLocalCollection(key);
             const durable = readLocalCollection(`master_${key}`);
             const firebaseCache = readLocalCollection(`firebase_${key}`);
@@ -4894,14 +4902,19 @@ if ('serviceWorker' in navigator) {
                 const classValue = merged.classId || merged.kelasId || merged.studentClassId || merged.rombelId || merged.className || merged.class || merged.kelas || '';
                 const normalizedClassId = typeof normalizeStudentClassValue === 'function' ? (normalizeStudentClassValue(classValue) || String(classValue || '').trim()) : String(classValue || '').trim();
                 const classLabel = merged.className || merged.kelas || merged.namaKelas || (typeof studentClassLabel === 'function' ? studentClassLabel(normalizedClassId) : '') || normalizedClassId;
-                const schoolId = merged.schoolId || merged.sekolahId || '';
+                const rawSchoolId = String(merged.schoolId || merged.sekolahId || merged.school_id || merged.schoolKey || '').trim();
+                const registeredSchools = typeof getRegisteredSchools === 'function' ? getRegisteredSchools() : (DEMO_DB.schools || []);
+                const schoolAliases = school => [school?.id, school?.schoolId, school?.sekolahId, school?.kodeSekolah, school?.npsn].map(v => String(v ?? '').trim()).filter(Boolean);
+                const schoolRecord = registeredSchools.find(school => schoolAliases(school).includes(rawSchoolId))
+                    || registeredSchools.find(school => String(school?.name || school?.schoolName || school?.namaSekolah || '').trim().toLowerCase() === String(merged.schoolName || merged.sekolahName || merged.asalSekolah || '').trim().toLowerCase());
+                const schoolId = String(schoolRecord?.id || schoolRecord?.schoolId || schoolRecord?.sekolahId || rawSchoolId).trim();
                 return { ...merged,
                     id: merged.studentId || merged.id || merged.userId || `STD-${merged.nisn || merged.username || Date.now()}-${Math.random().toString(36).slice(2,7)}`,
                     studentId: merged.studentId || (String(merged.id || '').startsWith('STD-') ? merged.id : ''),
                     userId: merged.userId || '',
                     name: merged.name || merged.nama || merged.fullName || merged.username || 'Murid',
                     nisn: merged.nisn || merged.nis || '',
-                    schoolId, schoolName: merged.schoolName || merged.sekolahName || merged.asalSekolah || getSchoolName(schoolId),
+                    schoolId, sekolahId: schoolId, schoolName: merged.schoolName || merged.sekolahName || merged.asalSekolah || getSchoolName(schoolId),
                     classId: normalizedClassId, kelasId: normalizedClassId, className: classLabel, kelas: classLabel,
                     gender: merged.gender || merged.jenisKelamin || merged.genderName || '-',
                     status: merged.status || 'ACTIVE',
@@ -5122,6 +5135,16 @@ if ('serviceWorker' in navigator) {
                     DEMO_DB.parents = parent ? DEMO_DB.parents.map(p => p.id === parent.id ? parentNext : p) : [...DEMO_DB.parents, parentNext];
                     persistDurableCollection('parents', DEMO_DB.parents);
                     try { await aksaraFbPersistCollection('parents', DEMO_DB.parents); } catch (e) { console.warn('[AKSARA] sinkron parents admin', e); }
+                    // Simpan relasi eksplisit wali-murid agar menu Wali Murid dan resolver akun
+                    // tidak hanya bergantung pada nama wali yang tersalin di profil murid.
+                    const parentLinks = (DEMO_DB.parent_student || []).filter(link =>
+                        String(link.parentId || '') !== String(parentNext.id) &&
+                        String(link.studentId || '') !== String(next.studentId)
+                    );
+                    parentLinks.push({ id: `LINK-${parentNext.id}-${next.studentId}`, parentId: parentNext.id, studentId: next.studentId, relationship: parentNext.relationship || 'WALI', updatedAt: new Date().toISOString() });
+                    DEMO_DB.parent_student = parentLinks;
+                    persistDurableCollection('parent_student', parentLinks);
+                    try { await aksaraFbPersistCollection('parent_student', parentLinks); } catch (e) { console.warn('[AKSARA] sinkron relasi wali-murid', e); }
                 }
                 // LOCAL-FIRST: simpan ke perangkat segera agar formulir tidak gagal hanya karena
                 // Firebase sedang lambat/tidak tersedia. Payload tertunda disimpan untuk sinkronisasi ulang.
