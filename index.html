@@ -80,7 +80,7 @@
   <script>"use strict";
 
 function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) { return typeof o; } : function (o) { return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o; }, _typeof(o); }
-var _excluded = ["correctAnswer", "author", "createdAt", "status"];
+var _excluded = ["correctAnswer", "answerKey", "kunciJawaban", "answer_key", "kunci_jawaban", "author", "createdAt", "status"];
 function _toConsumableArray(r) { return _arrayWithoutHoles(r) || _iterableToArray(r) || _unsupportedIterableToArray(r) || _nonIterableSpread(); }
 function _nonIterableSpread() { throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
 function _iterableToArray(r) { if ("undefined" != typeof Symbol && null != r[Symbol.iterator] || null != r["@@iterator"]) return Array.from(r); }
@@ -676,9 +676,10 @@ var mockApiService = {
                   var status = String(schedule.status || schedule.publishStatus || '').toUpperCase();
                   if (!['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(status)) return reject({ message: 'Ujian belum dibuka atau sudah ditutup.' });
                   var targets = (schedule.targetClassIds || schedule.classIds || (schedule.classId ? [schedule.classId] : [])).map(String).filter(Boolean);
-                  var classAllowed = schedule.targetScope === 'all' || !targets.length || targets.includes(String(student.classId || student.kelasId || ''));
-                  if (schedule.targetScope === 'manual' && !classAllowed) return reject({ message: 'Akses ujian ditolak. Ujian ini tidak ditujukan untuk kelas Anda.' });
-                  if (schedule.schoolId && student.schoolId && String(schedule.schoolId) !== String(student.schoolId)) return reject({ message: 'Akses ujian ditolak. Sekolah akun murid tidak sesuai dengan jadwal.' });
+                  var classAllowed = String(schedule.targetScope || '').toLowerCase() === 'all' || (!targets.length && String(schedule.targetScope || '').toLowerCase() !== 'manual') || targets.some(function (target) { return typeof sameClassIdentity === 'function' ? sameClassIdentity(target, student.classId || student.kelasId || student.className || student.kelas) : target === String(student.classId || student.kelasId || ''); });
+                  if (!classAllowed) return reject({ message: 'Akses ujian ditolak. Ujian ini tidak ditujukan untuk kelas Anda.' });
+                  var allSchoolScope = String(schedule.schoolScope || '').toLowerCase() === 'all' || String(schedule.schoolId || '').toUpperCase() === 'ALL' || (Array.isArray(schedule.schoolIds) && schedule.schoolIds.some(function (v) { return String(v).toUpperCase() === 'ALL'; }));
+                  if (!allSchoolScope && schedule.schoolId && student.schoolId && !(typeof sameSchoolIdentity === 'function' ? sameSchoolIdentity(schedule.schoolId, student.schoolId || student.sekolahId) : String(schedule.schoolId) === String(student.schoolId))) return reject({ message: 'Akses ujian ditolak. Sekolah akun murid tidak sesuai dengan jadwal.' });
 
                   var participant = DEMO_DB.examParticipants.find(function (p) { return String(p.scheduleId) === String(scheduleId) && String(p.studentId) === String(studentId); });
                   if (!participant) {
@@ -687,24 +688,29 @@ var mockApiService = {
                   }
                   if (participant.status === 'BLOCKED' || participant.status === 'DISQUALIFIED') return reject({ message: 'Akses ujian untuk akun ini telah dibatasi oleh pengawas.' });
 
-                  var attempt = DEMO_DB.examAttempts.find(function (a) { return String(a.scheduleId) === String(scheduleId) && String(a.studentId) === String(studentId); });
+                  var priorAttempts = (DEMO_DB.examAttempts || []).filter(function (a) { return String(a.scheduleId) === String(scheduleId) && String(a.studentId) === String(studentId); }).sort(function (a, b) { return new Date(b.serverStartTime || b.createdAt || 0) - new Date(a.serverStartTime || a.createdAt || 0); });
+                  var attempt = priorAttempts.find(function (a) { return String(a.status || '').toUpperCase() === 'IN_PROGRESS'; });
+                  var submittedAttempts = priorAttempts.filter(function (a) { return ['SUBMITTED','FORCE_SUBMITTED','AUTO_SUBMITTED'].includes(String(a.status || '').toUpperCase()); });
+                  var retryAllowed = String(schedule.attemptMode || '').toUpperCase() === 'RETRY' || schedule.allowRetry === true;
+                  var maxAttempts = retryAllowed ? Math.max(1, Number(schedule.maxAttempts) || 2) : 1;
+                  if (!attempt && submittedAttempts.length >= maxAttempts) return reject({ message: 'Batas percobaan ujian telah tercapai.' });
                   if (!attempt) {
-                    var pkgForDuration = DEMO_DB.examPackages.find(function (p) { return String(p.id) === String(schedule.packageId || schedule.examId); });
+                    var pkgForDuration = DEMO_DB.examPackages.find(function (p) { return String(p.id || p.examId) === String(schedule.packageId || schedule.examId); });
                     var duration = Number(schedule.duration || pkgForDuration && pkgForDuration.duration || 60);
-                    attempt = { id: 'ATT-' + Date.now(), scheduleId: scheduleId, studentId: studentId, status: 'IN_PROGRESS', serverStartTime: new Date().toISOString(), expectedEndTime: new Date(Date.now() + duration * 60000).toISOString() };
-                    DEMO_DB.examAttempts.push(attempt);
-                    participant.status = 'IN_PROGRESS';
-                  } else if (attempt.status === 'SUBMITTED') {
-                    return reject({ message: 'Anda sudah menyelesaikan ujian ini.' });
+                    attempt = { id: 'ATT-' + Date.now() + '-' + Math.random().toString(36).slice(2,7), scheduleId: scheduleId, studentId: studentId, attemptNumber: submittedAttempts.length + 1, status: 'IN_PROGRESS', serverStartTime: new Date().toISOString(), expectedEndTime: new Date(Date.now() + duration * 60000).toISOString() };
+                    DEMO_DB.examAttempts.push(attempt); participant.status = 'IN_PROGRESS';
                   } else if (!attempt.expectedEndTime) {
-                    var pkgForRepair = DEMO_DB.examPackages.find(function (p) { return String(p.id) === String(schedule.packageId || schedule.examId); });
+                    var pkgForRepair = DEMO_DB.examPackages.find(function (p) { return String(p.id || p.examId) === String(schedule.packageId || schedule.examId); });
                     var repairDuration = Number(schedule.duration || pkgForRepair && pkgForRepair.duration || 60);
                     attempt.expectedEndTime = new Date(new Date(attempt.serverStartTime || Date.now()).getTime() + repairDuration * 60000).toISOString();
                   }
 
                   var pkg = DEMO_DB.examPackages.find(function (p) { return String(p.id) === String(schedule.packageId || schedule.examId); });
                   if (!pkg) return reject({ message: 'Paket ujian tidak ditemukan. Periksa paket yang dipilih Admin Super.' });
-                  var questionsSnapshot = (DEMO_DB.questions || []).filter(function (q) { return String(q.subjectId) === String(pkg.subjectId); }).map(function (q) {
+                  var packageQuestionIds = (pkg.questionIds || pkg.question_ids || pkg.questions || []).map(function (item) { return String(typeof item === 'object' ? (item.id || item.questionId || '') : item); }).filter(Boolean);
+                  var questionsSnapshot = (DEMO_DB.questions || []).filter(function (q) {
+                    return packageQuestionIds.length ? packageQuestionIds.includes(String(q.id || q.questionId)) : String(q.subjectId || q.mapelId || '') === String(pkg.subjectId || pkg.mapelId || '');
+                  }).map(function (q) {
                     var correctAnswer = q.correctAnswer, author = q.author, createdAt = q.createdAt, status = q.status, safeQuestion = _objectWithoutProperties(q, _excluded);
                     return safeQuestion;
                   });
@@ -728,7 +734,7 @@ var mockApiService = {
             return _context4.a(2, new Promise(function (resolve) {
               setTimeout(function () {
                 var record = DEMO_DB.answers.find(function (a) {
-                  return a.attemptId === attemptId && a.questionId === questionId;
+                  return String(a.attemptId) === String(attemptId) && String(a.questionId) === String(questionId);
                 });
                 if (record) {
                   record.answerData = answerData;
@@ -790,20 +796,16 @@ var mockApiService = {
     return submitExam;
   }(),
   internalAutoGrade: function internalAutoGrade(attemptId) {
-    var attempt = DEMO_DB.examAttempts.find(function (a) {
-      return a.id === attemptId;
-    });
-    var schedule = DEMO_DB.examSchedules.find(function (s) {
-      return s.id === attempt.scheduleId;
-    });
-    var pkg = DEMO_DB.examPackages.find(function (p) {
-      return p.id === schedule.packageId;
-    });
-    var questions = DEMO_DB.questions.filter(function (q) {
-      return q.subjectId === pkg.subjectId;
-    });
+    var attempt = (DEMO_DB.examAttempts || []).find(function (a) { return String(a.id) === String(attemptId); });
+    if (!attempt) return null;
+    var schedule = (DEMO_DB.examSchedules || []).find(function (s) { return String(s.id || s.scheduleId) === String(attempt.scheduleId); });
+    if (!schedule) return null;
+    var pkg = (DEMO_DB.examPackages || []).find(function (p) { return String(p.id || p.examId) === String(schedule.packageId || schedule.examId); });
+    if (!pkg) return null;
+    var packageQuestionIds = (pkg.questionIds || pkg.question_ids || pkg.questions || []).map(function (item) { return String(typeof item === 'object' ? (item.id || item.questionId || '') : item); }).filter(Boolean);
+    var questions = (DEMO_DB.questions || []).filter(function (q) { return packageQuestionIds.length ? packageQuestionIds.includes(String(q.id || q.questionId)) : String(q.subjectId || q.mapelId || '') === String(pkg.subjectId || pkg.mapelId || ''); });
     var answers = DEMO_DB.answers.filter(function (a) {
-      return a.attemptId === attemptId;
+      return String(a.attemptId) === String(attemptId);
     });
     var totalScore = 0;
     var maxScore = 0;
@@ -813,21 +815,35 @@ var mockApiService = {
     var hasEssay = false;
     questions.forEach(function (q) {
       maxScore += q.weight || 1;
+      var type = String(q.type || q.questionType || '').toUpperCase();
       var ans = answers.find(function (a) {
-        return a.questionId === q.id;
+        return String(a.questionId) === String(q.id || q.questionId);
       });
-      if (!ans || !ans.answerData) {
+      if (!ans || ans.answerData === undefined || ans.answerData === null || ans.answerData === '') {
         unansweredCount++;
+        // Sebagian tipe menyimpan jawaban per baris/pasangan, bukan pada ID soal induk.
+        // Jangan otomatis menandai hasil sebagai final jika struktur jawaban belum dapat dinilai.
+        if (['ESSAY','URAIAN','MATCHING','MENJODOHKAN','TRUE_FALSE','BENAR_SALAH'].includes(type)) hasEssay = true;
         return;
       }
-      if (q.type === 'MULTIPLE_CHOICE') {
-        if (q.correctAnswer.includes(ans.answerData)) {
-          totalScore += q.weight || 1;
-          correctCount++;
-        } else {
-          incorrectCount++;
-        }
-      } else if (q.type === 'ESSAY') {
+      var expected = q.correctAnswer ?? q.answerKey ?? q.kunciJawaban;
+      var actual = ans.answerData;
+      if (type === 'ESSAY' || type === 'URAIAN') {
+        hasEssay = true;
+      } else if (type === 'MULTIPLE_CHOICE' || type === 'PG' || type === 'SINGLE_CHOICE') {
+        var expectedList = Array.isArray(expected) ? expected.map(String) : [String(expected ?? '')];
+        if (expectedList.includes(String(actual ?? ''))) { totalScore += q.weight || 1; correctCount++; } else { incorrectCount++; }
+      } else if (type === 'MULTIPLE_SELECT' || type === 'CHECKBOX' || type === 'PG_COMPLEX') {
+        var expSet = (Array.isArray(expected) ? expected : String(expected ?? '').split(',')).map(function(v){return String(v).trim();}).filter(Boolean).sort().join('|');
+        var actSet = (Array.isArray(actual) ? actual : String(actual ?? '').split(',')).map(function(v){return String(v).trim();}).filter(Boolean).sort().join('|');
+        if (expSet && expSet === actSet) { totalScore += q.weight || 1; correctCount++; } else { incorrectCount++; }
+      } else if (type === 'TRUE_FALSE' || type === 'BENAR_SALAH' || type === 'SHORT_ANSWER' || type === 'ISIAN' || type === 'FILL_IN') {
+        var normExpected = String(expected ?? '').trim().toLowerCase();
+        var normActual = String(actual ?? '').trim().toLowerCase();
+        if (normExpected && normExpected === normActual) { totalScore += q.weight || 1; correctCount++; } else { incorrectCount++; }
+      } else if (type === 'MATCHING' || type === 'MENJODOHKAN') {
+        hasEssay = true;
+      } else {
         hasEssay = true;
       }
     });
@@ -837,22 +853,14 @@ var mockApiService = {
     var existingResult = DEMO_DB.examResults.find(function (r) {
       return r.attemptId === attemptId;
     });
-    if (!existingResult) {
-      DEMO_DB.examResults.push({
-        id: "RES-".concat(Date.now()),
-        attemptId: attempt.id,
-        scheduleId: attempt.scheduleId,
-        studentId: attempt.studentId,
-        totalScore: totalScore,
-        maxScore: maxScore,
-        percentage: percentage.toFixed(2),
-        grade: grade,
-        correctCount: correctCount,
-        incorrectCount: incorrectCount,
-        unansweredCount: unansweredCount,
-        status: hasEssay ? 'NEEDS_REVIEW' : 'AUTO_GRADED'
-      });
-    }
+    var resultRecord = {
+      id: existingResult?.id || "RES-".concat(Date.now()), attemptId: attempt.id, scheduleId: attempt.scheduleId, studentId: attempt.studentId,
+      totalScore: totalScore, maxScore: maxScore, percentage: percentage.toFixed(2), grade: grade,
+      correctCount: correctCount, incorrectCount: incorrectCount, unansweredCount: unansweredCount,
+      status: hasEssay ? 'NEEDS_REVIEW' : (existingResult?.status === 'PUBLISHED' ? 'PUBLISHED' : 'AUTO_GRADED'), updatedAt: new Date().toISOString()
+    };
+    if (existingResult) Object.assign(existingResult, resultRecord); else DEMO_DB.examResults.push(resultRecord);
+    return resultRecord;
   },
   getResultsSummary: function () {
     var _getResultsSummary = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee6(scheduleId) {
@@ -862,7 +870,7 @@ var mockApiService = {
             return _context6.a(2, new Promise(function (resolve) {
               setTimeout(function () {
                 var results = DEMO_DB.examResults.filter(function (r) {
-                  return r.scheduleId === scheduleId;
+                  return String(r.scheduleId) === String(scheduleId);
                 });
                 var detailedResults = results.map(function (r) {
                   var student = DEMO_DB.students.find(function (s) {
@@ -899,11 +907,11 @@ var mockApiService = {
             return _context7.a(2, new Promise(function (resolve) {
               setTimeout(function () {
                 var results = DEMO_DB.examResults.filter(function (r) {
-                  return r.studentId === studentId && r.status === 'PUBLISHED';
+                  return String(r.studentId) === String(studentId) && r.status === 'PUBLISHED';
                 });
                 var detailed = results.map(function (r) {
                   var schedule = DEMO_DB.examSchedules.find(function (s) {
-                    return s.id === r.scheduleId;
+                    return String(s.id || s.scheduleId) === String(r.scheduleId);
                   });
                   return _objectSpread(_objectSpread({}, r), {}, {
                     examName: schedule === null || schedule === void 0 ? void 0 : schedule.name,
@@ -3113,9 +3121,27 @@ var AdminSystemHealth = function AdminSystemHealth() {
 };
 var AdminExamPackages = function AdminExamPackages() {
   var _React$useState = React.useState(null), selected = _React$useState[0], setSelected = _React$useState[1];
-  var packages = DEMO_DB.examPackages;
-  var save = function (p) { DEMO_DB.examPackages = packages.map(function(x){ return x.id === p.id ? p : x; }); setSelected(null); };
-  var remove = function (p) { if (window.confirm('Hapus paket ini saja?')) { DEMO_DB.examPackages = packages.filter(function(x){return x.id !== p.id;}); setSelected(null); } };
+  var packages = DEMO_DB.examPackages || [];
+  var save = function (p) {
+    var current = Array.isArray(DEMO_DB.examPackages) ? DEMO_DB.examPackages : [];
+    var exists = current.some(function(x){ return String(x.id || x.examId) === String(p.id || p.examId); });
+    var next = exists ? current.map(function(x){ return String(x.id || x.examId) === String(p.id || p.examId) ? Object.assign({}, x, p, { updatedAt: new Date().toISOString() }) : x; }) : current.concat([Object.assign({}, p, { createdAt: p.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() })]);
+    DEMO_DB.examPackages = next;
+    if (typeof AKSARA_FIREBASE !== 'undefined') aksaraFbReady().then(function(){ return AKSARA_FIREBASE.db.ref('examPackages').transaction(function(current){ var rows = current && typeof current === 'object' ? Object.assign({}, current) : {}; var id = String(p.id || p.examId || ''); rows[id] = aksaraFbSafe(p); return rows; }); }).catch(function(e){ console.warn('[AKSARA] Paket belum tersinkron ke Firebase', e); });
+    setSelected(null);
+    window.dispatchEvent(new CustomEvent('aksara:firebase-changed', { detail: { key: 'examPackages' } }));
+  };
+  var remove = function (p) {
+    var usedBy = (DEMO_DB.examSchedules || []).some(function(x){ return String(x.packageId || x.examId || '') === String(p.id || p.examId || ''); });
+    if (usedBy) { window.alert('Paket ini masih digunakan oleh jadwal ujian. Ubah atau hapus jadwal terkait terlebih dahulu.'); return; }
+    if (window.confirm('Hapus paket ini saja?')) {
+      var next = (DEMO_DB.examPackages || []).filter(function(x){return String(x.id || x.examId) !== String(p.id || p.examId);});
+      DEMO_DB.examPackages = next;
+      if (typeof AKSARA_FIREBASE !== 'undefined') aksaraFbReady().then(function(){ return AKSARA_FIREBASE.db.ref('examPackages').transaction(function(current){ if (!current || typeof current !== 'object') return current; var rows = Object.assign({}, current); Object.keys(rows).forEach(function(k){ if (String(rows[k]?.id || rows[k]?.examId || k) === String(p.id || p.examId || '')) delete rows[k]; }); return rows; }); }).catch(function(e){ console.warn('[AKSARA] Penghapusan paket belum tersinkron ke Firebase', e); });
+      setSelected(null);
+      window.dispatchEvent(new CustomEvent('aksara:firebase-changed', { detail: { key: 'examPackages' } }));
+    }
+  };
   return React.createElement('div',{className:'space-y-6'},React.createElement('div',{className:'flex justify-between items-center'},React.createElement('div',null,React.createElement('h2',{className:'text-2xl font-heading font-bold text-gray-900'},'Paket Ujian'),React.createElement('p',{className:'text-gray-500 text-sm'},'Kelola paket dan ujian yang digunakan.')),React.createElement('button',{onClick:function(){setSelected({id:'PKG-'+Date.now(),name:'Paket Baru',status:'DRAFT',duration:60,examIds:[]});},className:'px-4 py-2 bg-aksara-600 text-white rounded-lg'},'Buat Paket Ujian')),React.createElement('div',{className:'bg-white rounded-xl border overflow-x-auto'},React.createElement('table',{className:'w-full text-left'},React.createElement('thead',null,React.createElement('tr',{className:'bg-gray-50 text-xs uppercase text-gray-500'},React.createElement('th',{className:'p-4'},'Nama Paket'),React.createElement('th',{className:'p-4'},'Status'),React.createElement('th',{className:'p-4'},'Ujian'),React.createElement('th',{className:'p-4 text-right'},'Aksi'))),React.createElement('tbody',{className:'divide-y'},packages.map(function(p){var ids=p.examIds||p.ujianIds||[];return React.createElement('tr',{key:p.id},React.createElement('td',{className:'p-4 font-semibold'},p.name),React.createElement('td',{className:'p-4'},p.status||'-'),React.createElement('td',{className:'p-4'},ids.length),React.createElement('td',{className:'p-4 text-right'},React.createElement('button',{onClick:function(){setSelected(Object.assign({},p));},className:'text-aksara-600 mr-3'},'Lihat'),React.createElement('button',{onClick:function(){remove(p);},className:'text-red-600'},'Hapus')));}))))),selected&&React.createElement('div',{className:'fixed inset-0 z-[999] flex items-center justify-center p-4 bg-gray-900/50'},React.createElement('div',{className:'bg-white rounded-2xl p-6 w-full max-w-lg'},React.createElement('h3',{className:'text-xl font-bold mb-4'},'Paket Ujian'),React.createElement('input',{value:selected.name||'',onChange:function(e){setSelected(Object.assign({},selected,{name:e.target.value}));},className:'w-full border rounded-lg p-2 mb-3',placeholder:'Nama paket'}),React.createElement('p',{className:'font-semibold mb-2'},'Ujian yang dipakai'),(DEMO_DB.examSchedules||[]).map(function(ex){var ids=selected.examIds||[];return React.createElement('label',{key:ex.id,className:'flex gap-2 p-2'},React.createElement('input',{type:'checkbox',checked:ids.includes(ex.id),onChange:function(e){setSelected(Object.assign({},selected,{examIds:e.target.checked?ids.concat(ex.id):ids.filter(function(x){return x!==ex.id;})}));}}),ex.name||ex.id);} ),React.createElement('div',{className:'flex justify-end gap-3 mt-5'},React.createElement('button',{onClick:function(){setSelected(null);},className:'px-4 py-2 bg-gray-100 rounded-lg'},'Batal'),React.createElement('button',{onClick:function(){save(selected);},className:'px-4 py-2 bg-aksara-600 text-white rounded-lg'},'Simpan'))));
 };
 var AdminRouter = function AdminRouter(_ref15) {
@@ -4222,12 +4248,17 @@ if ('serviceWorker' in navigator) {
                 const profile = { ...aksaraFbSafe(localUser), firebaseUid: cred.user.uid, email: cred.user.email || localUser.email || email };
                 delete profile.password;
                 await AKSARA_FIREBASE.db.ref(`users/${cred.user.uid}`).set(profile);
-                // Jika Admin baru saja membuat data sebelum Firebase Auth selesai, kirim cache lokal sekarang.
+                // Isi node Firebase yang benar-benar belum ada saja. Jangan pernah menimpa
+                // koleksi yang sudah ada dengan cache lokal lama saat login, karena hal itu
+                // dapat menghidupkan kembali jadwal/paket/hasil yang sudah dihapus di perangkat lain.
                 const syncKeys = ['schools','academicYears','teachers','students','parents','parent_student','classes','subjects','questions','assessments','questionBanks','examPackages','examSchedules','examParticipants','examAttempts','answers','examResults','notifications','announcements','webhooks'];
                 for (const key of syncKeys) {
                     try {
+                        const ref = AKSARA_FIREBASE.db.ref(key);
+                        const existing = await ref.once('value');
+                        if (existing.exists()) continue;
                         const rows = Array.isArray(DEMO_DB[key]) ? DEMO_DB[key] : [];
-                        if (rows.length) await AKSARA_FIREBASE.db.ref(key).set(aksaraFbMap(key, rows));
+                        if (rows.length) await ref.set(aksaraFbMap(key, rows));
                     } catch(e) { console.warn('[AKSARA] Sinkron awal dilewati:', key, e); }
                 }
                 await aksaraFbStart();
@@ -6555,8 +6586,15 @@ if ('serviceWorker' in navigator) {
 
                         const end = new Date(res.data.attempt.expectedEndTime).getTime();
                         const now = new Date(res.data.serverTime).getTime();
-                        setTimeRemaining(Math.max(0, Math.floor((end - now) / 1000)));
+                        const remaining = Math.max(0, Math.floor((end - now) / 1000));
+                        setTimeRemaining(remaining);
                         setLoading(false);
+                        if (remaining <= 0 && String(res.data.attempt.status || '').toUpperCase() === 'IN_PROGRESS') {
+                            mockApiService.submitExam(res.data.attempt.id).then(() => {
+                                alert('Waktu ujian telah berakhir. Jawaban yang tersimpan telah dikirim.');
+                                setRoute('murid/dashboard');
+                            }).catch(err => console.warn('[AKSARA] Gagal mengirim ujian yang kedaluwarsa', err));
+                        }
                     })
                     .catch(err => {
                         setError(err.message);
@@ -6844,10 +6882,16 @@ if ('serviceWorker' in navigator) {
                 return allClasses.filter(c => !sid || String(c.schoolId || c.sekolahId || '').trim() === sid);
             }, [allClasses, editing?.schoolId]);
             React.useEffect(() => {
+                let alive = true;
+                const initialLoad = async () => {
+                    try { const latest = await readPersistentSchedules(); if (alive) setItems([...latest]); }
+                    catch (e) { console.warn('[AKSARA] Gagal memuat jadwal terbaru di Admin Super', e); }
+                };
                 const refresh = () => setItems(mergeLatestSchedules(DEMO_DB.examSchedules || []));
+                initialLoad();
                 window.addEventListener('aksara:schedules-changed', refresh);
                 window.addEventListener('aksara:firebase-changed', refresh);
-                return () => { window.removeEventListener('aksara:schedules-changed', refresh); window.removeEventListener('aksara:firebase-changed', refresh); };
+                return () => { alive = false; window.removeEventListener('aksara:schedules-changed', refresh); window.removeEventListener('aksara:firebase-changed', refresh); };
             }, []);
             const ensureToken = x => makeExamToken(x?.scheduleId || x?.id, Math.max(1, Number(x?.tokenVersion) || 1));
             const regenerate = x => {
@@ -6941,23 +6985,43 @@ if ('serviceWorker' in navigator) {
                     const saved = normalizeScheduleRecord(next);
                     const data = editing.id ? items.map(x => String(x.id || x.scheduleId) === String(saved.id || saved.scheduleId) ? saved : x) : [...items.filter(x => String(x.scheduleId || x.id) !== String(saved.scheduleId)), saved];
                     DEMO_DB.examSchedules = mergeLatestSchedules(data);
-                    persistDurableCollection('examSchedules', DEMO_DB.examSchedules);
+                    try { const serialized = JSON.stringify(DEMO_DB.examSchedules); localStorage.setItem('aksara_examSchedules', serialized); localStorage.setItem('master_examSchedules', serialized); localStorage.setItem('aksara_firebase_examSchedules', serialized); } catch(e) {}
                     setItems([...DEMO_DB.examSchedules]);
+                    // Upsert hanya record yang diedit/dibuat. Hindari .set() pada seluruh
+                    // koleksi yang dapat menimpa jadwal baru dari perangkat lain.
+                    await aksaraFbReady();
+                    await AKSARA_FIREBASE.db.ref('examSchedules').child(String(saved.scheduleId || saved.id)).set(aksaraFbSafe(saved));
                     setEditing(null);
                     setSaving(false);
-                    setNotice('Jadwal ujian berhasil disimpan.');
+                    setNotice('Jadwal ujian berhasil disimpan ke Firebase.');
                     window.dispatchEvent(new CustomEvent('aksara:schedules-changed'));
-                    // Sinkronisasi Firebase/Canva berjalan di belakang layar.
-                    setTimeout(() => {
-                        aksaraFbPersistCollection('examSchedules', DEMO_DB.examSchedules).catch(() => {});
-                        persistSchedule(saved).catch(() => {});
-                    }, 0);
+                    try { await ensureScheduleSdk(); } catch(e) {}
                 } catch (err) {
                     setError(err?.message || 'Jadwal gagal disimpan.');
                     setSaving(false);
                 }
             };
-            const remove = id => { if (!window.confirm('Hapus jadwal ini saja?')) return; const d=items.filter(x=>String(x.id||x.scheduleId)!==String(id)); DEMO_DB.examSchedules=d; setItems(d); aksaraFbPersistCollection('examSchedules', d); window.dispatchEvent(new CustomEvent('aksara:schedules-changed')); };
+            const remove = async id => {
+                if (!window.confirm('Hapus jadwal ini saja?')) return;
+                const key = String(id || '').trim();
+                if (!key) return setError('ID jadwal tidak ditemukan.');
+                const d = (items || []).filter(x => String(x.id || x.scheduleId) !== key);
+                DEMO_DB.examSchedules = d; setItems(d);
+                try { const serialized = JSON.stringify(d); localStorage.setItem('aksara_examSchedules', serialized); localStorage.setItem('master_examSchedules', serialized); localStorage.setItem('aksara_firebase_examSchedules', serialized); } catch(e) {}
+                try {
+                    await aksaraFbReady();
+                    const result = await AKSARA_FIREBASE.db.ref('examSchedules').transaction(current => {
+                        if (Array.isArray(current)) return current.filter(row => String(row?.id || row?.scheduleId || row?.schedule_id || '') !== key);
+                        if (!current || typeof current !== 'object') return current;
+                        const next = { ...current };
+                        Object.keys(next).forEach(k => { if (String(next[k]?.id || next[k]?.scheduleId || next[k]?.schedule_id || k) === key) delete next[k]; });
+                        return next;
+                    });
+                    if (!result.committed) throw new Error('Penghapusan jadwal tidak berhasil dikonfirmasi Firebase.');
+                    setNotice('Jadwal berhasil dihapus dan perubahan dikirim ke Firebase.'); setError('');
+                } catch(e) { setError('Penghapusan di Firebase gagal. Periksa koneksi/izin database, lalu muat ulang.'); console.warn('[AKSARA] Hapus jadwal Firebase gagal', e); }
+                window.dispatchEvent(new CustomEvent('aksara:schedules-changed'));
+            };
             return <div className="space-y-6">
                 <div className="flex justify-between"><div><h2 className="text-2xl font-heading font-bold">Jadwal Ujian</h2><p className="text-sm text-gray-500">Atur sekolah, paket, tanggal, target kelas, durasi, dan jumlah percobaan.</p></div><button onClick={()=>open()} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Buat Jadwal Ujian Baru</button></div>
                 {error&&<div role="alert" className="p-3 bg-red-50 text-red-700 rounded-lg">{error}</div>}{notice&&<div role="status" className="p-3 bg-teal-50 text-teal-700 rounded-lg">{notice}</div>}
@@ -7490,7 +7554,7 @@ if ('serviceWorker' in navigator) {
         const getLocalCalendarDate = (schedule = {}) => { const value = schedule.date || schedule.startTime || schedule.start_time; if (!value) return ''; const timezone = schedule.timezone || 'Asia/Jakarta'; try { const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(value)).reduce((out, part) => { if (part.type !== 'literal') out[part.type] = part.value; return out; }, {}); return parts.year && parts.month && parts.day ? `${parts.year}-${parts.month}-${parts.day}` : String(value).slice(0, 10); } catch (e) { return String(value).slice(0, 10); } };
         const getStableExamKey = schedule => String(schedule.examId || schedule.packageId || schedule.questionSetId || schedule.question_set_id || `schedule:${schedule.scheduleId || schedule.id || 'unknown'}`);
         const dedupeStudentSchedules = (records = []) => { const grouped = new Map(); records.forEach(record => { const key = `${String(record.schoolId || '')}|${getStableExamKey(record)}|${getLocalCalendarDate(record)}`; const current = grouped.get(key); if (!current) return grouped.set(key, { ...record, duplicateCount: 1 }); const currentRank = ['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(String(current.status || '').toUpperCase()) ? 1 : 0; const nextRank = ['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(String(record.status || '').toUpperCase()) ? 1 : 0; const currentUpdated = new Date(current.updatedAt || current.updated_at || current.createdAt || 0).getTime() || 0; const nextUpdated = new Date(record.updatedAt || record.updated_at || record.createdAt || 0).getTime() || 0; const preferred = nextRank > currentRank || (nextRank === currentRank && nextUpdated > currentUpdated) ? record : current; grouped.set(key, { ...current, ...preferred, name: preferred.name || current.name, packageName: preferred.packageName || current.packageName, duplicateCount: (current.duplicateCount || 1) + 1 }); }); return [...grouped.values()]; };
-        const MuridDashboard = () => { const {user}=React.useContext(AppContext); const [stage,setStage]=React.useState('home'); const [selected,setSelected]=React.useState(null); const [token,setToken]=React.useState(''); const [error,setError]=React.useState(''); const [refreshing,setRefreshing]=React.useState(false); const [profileVersion,setProfileVersion]=React.useState(0); const [profileSyncError,setProfileSyncError]=React.useState(''); const student=getStudentProfile(user); const stableSchedulePredicate = React.useCallback(() => true, []); const scheduleSource=usePersistentSchedules(stableSchedulePredicate).items; React.useEffect(()=>{const refresh=()=>{try{readPersistentStudents();setProfileSyncError('')}catch(e){setProfileSyncError('Profil gagal disegarkan. Coba lagi.')}setProfileVersion(v=>v+1)}; const firebaseRefresh=event=>{const key=event?.detail?.key;if(!key||['students','schools','classes','examSchedules','examPackages','examParticipants'].includes(key))refresh()}; window.addEventListener('focus',refresh); window.addEventListener('aksara:schedules-changed',refresh); window.addEventListener('aksara:firebase-changed',firebaseRefresh); return()=>{window.removeEventListener('focus',refresh);window.removeEventListener('aksara:schedules-changed',refresh);window.removeEventListener('aksara:firebase-changed',firebaseRefresh)}},[user?.id]); const schedules=dedupeStudentSchedules(scheduleSource.filter(s=>{const participant=(DEMO_DB.examParticipants||[]).find(p=>String(p.scheduleId||p.examScheduleId)===String(s.id||s.scheduleId)&&[p.studentId,p.muridId,p.userId].some(v=>String(v??'')===String(student?.id||student?.studentId)));const targets=(s.targetClassIds||s.classIds||(s.classId?[s.classId]:[])).map(String);const classAllowed=String(s.targetScope||'').toLowerCase()==='all'||String(s.schoolScope||'').toLowerCase()==='all'||String(s.schoolId||'').toUpperCase()==='ALL'||(!targets.length&&String(s.targetScope||'').toLowerCase()!=='manual')||targets.some(t=>sameClassIdentity(t,student?.classId||student?.kelasId||student?.className));const status=String(s.status||s.publishStatus||s.publish_status||'').toUpperCase();const active=['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(status);const schoolAllowed=String(s.schoolScope||'').toLowerCase()==='all'||String(s.schoolId||'').toUpperCase()==='ALL'||!s.schoolId||sameSchoolIdentity(s.schoolId,student?.schoolId||student?.sekolahId)||sameSchoolIdentity(s.rawSchoolId,student?.schoolId||student?.sekolahId);return !!student&&String(student.status||'ACTIVE').toUpperCase()==='ACTIVE'&&!!student.schoolId&&!!student.classId&&schoolAllowed&&classAllowed&&(active||participant);}).map(s=>({...s,package:DEMO_DB.examPackages.find(p=>String(p.id||p.examId)===String(s.packageId||s.examId)),participant:DEMO_DB.examParticipants.find(p=>String(p.scheduleId||p.examScheduleId)===String(s.id||s.scheduleId)&&String(p.studentId||p.muridId)===String(student?.id||student?.studentId)),result:DEMO_DB.examResults.find(r=>String(r.scheduleId)===String(s.id||s.scheduleId)&&String(r.studentId)===String(student?.id||student?.studentId))}))).sort((a,b)=>new Date(a.startTime||0)-new Date(b.startTime||0)); const results=(DEMO_DB.examResults||[]).filter(r=>String(r.studentId)===String(student?.id)).map(r=>({...r,schedule:DEMO_DB.examSchedules.find(s=>s.id===r.scheduleId),package:DEMO_DB.examPackages.find(p=>p.id===DEMO_DB.examSchedules.find(s=>s.id===r.scheduleId)?.packageId)})).sort((a,b)=>new Date(b.submittedAt||b.publishedAt||0)-new Date(a.submittedAt||a.publishedAt||0)); const begin=s=>{setSelected(s);setStage('detail');setError('');}; const validateToken=()=>{const s=selected;const targets=(s?.targetClassIds||s?.classIds||(s?.classId?[s.classId]:[])).map(String);const classAllowed=String(s?.targetScope||'').toLowerCase()==='all'||String(s?.schoolScope||'').toLowerCase()==='all'||String(s?.schoolId||'').toUpperCase()==='ALL'||(!targets.length&&String(s?.targetScope||'').toLowerCase()!=='manual')||targets.some(t=>sameClassIdentity(t,student?.classId||student?.kelasId||student?.className));const status=['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(String(s?.status||s?.publishStatus||s?.publish_status||'').toUpperCase());const schoolAllowed=String(s?.schoolScope||'').toLowerCase()==='all'||String(s?.schoolId||'').toUpperCase()==='ALL'||!s?.schoolId||sameSchoolIdentity(s?.schoolId,student?.schoolId||student?.sekolahId)||sameSchoolIdentity(s?.rawSchoolId,student?.schoolId||student?.sekolahId);const ok=s&&status&&classAllowed&&schoolAllowed&&String(s.token||'').toUpperCase()===token.trim().toUpperCase();if(!ok)return setError('TOKEN salah, jadwal belum dibuka, atau tidak berlaku untuk akun ini.');setStage('exam');}; const refresh=()=>{setRefreshing(true);setTimeout(()=>setRefreshing(false),350);}; if(stage==='exam')return <ExamRoom scheduleId={selected.id}/>; const initials=(student?.name||user?.name||'?').split(' ').map(x=>x[0]).slice(0,2).join('').toUpperCase(); return <div className="space-y-6">{(profileSyncError||relationMessage(student))&&<div role="alert" className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4"><p className="font-semibold">Profil belum terhubung</p><p className="text-sm mt-1">{profileSyncError||relationMessage(student)}</p><button type="button" onClick={()=>{readPersistentStudents();setProfileVersion(v=>v+1)}} className="mt-3 px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-sm font-medium">Segarkan Profil</button></div>}<section className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 md:p-8"><div className="flex flex-col md:flex-row md:items-center gap-6"><div className="w-20 h-20 rounded-2xl bg-aksara-900 text-white flex items-center justify-center text-2xl font-bold shadow-lg">{initials}</div><div className="flex-1"><p className="text-xs uppercase tracking-[.2em] text-amber-600 font-bold">Profil Murid</p><h1 className="text-3xl font-heading font-bold text-gray-900 mt-1">{student?.name||user?.name||'Belum tersedia'}</h1><p className="text-gray-500 mt-2">{student?.nisn||'Belum tersedia'} · {user?.username||'Identitas akun belum tersedia'}</p><p className="text-sm text-gray-600 mt-1">Sekolah: {getSchoolName(student?.schoolId,student?.schoolName||student?.sekolahName)||'Sekolah belum tersedia'} · Kelas: {resolveClassDisplay(student?.classId||student?.kelasId||student?.className||student?.kelas,student?.schoolId)||'Kelas belum tersedia'}</p><p className="text-xs text-gray-400 mt-1">Kunci sekolah: {student?.schoolId||student?.sekolahId||'Belum diisi'} · Kunci kelas: {student?.classId||student?.kelasId||'Belum diisi'}</p></div><span className="px-3 py-1.5 rounded-full bg-teal-50 text-teal-700 text-sm font-semibold">{student?.status==='ACTIVE'?'Akun aktif':'Status belum tersedia'}</span></div><div className="grid grid-cols-2 gap-3 mt-6"><div className="bg-gray-50 rounded-xl p-4"><p className="text-xs text-gray-500">Ujian terjadwal</p><p className="text-2xl font-bold text-gray-900">{schedules.length}</p></div><div className="bg-gray-50 rounded-xl p-4"><p className="text-xs text-gray-500">Hasil tersedia</p><p className="text-2xl font-bold text-gray-900">{results.length}</p></div></div></section><div className="flex flex-wrap gap-2"><button onClick={()=>setStage('home')} className={`px-4 py-2 rounded-lg ${stage==='home'?'bg-aksara-900 text-white':'bg-white border'}`}>Riwayat Ujian</button><button onClick={()=>setStage('results')} className={`px-4 py-2 rounded-lg ${stage==='results'?'bg-aksara-900 text-white':'bg-white border'}`}>Hasil Ujian</button><button onClick={refresh} className="px-4 py-2 bg-white border rounded-lg">{refreshing?'Memuat...':'Refresh'}</button></div>{stage==='results'?<section className="bg-white rounded-xl border overflow-hidden"><div className="p-5 border-b"><h2 className="text-xl font-bold">Hasil Ujian</h2></div>{results.length?results.map(r=><div key={r.id} className="p-5 border-b last:border-0"><div className="flex justify-between gap-3"><div><h3 className="font-semibold">{r.schedule?.name||'Ujian belum tersedia'}</h3><p className="text-sm text-gray-500">{r.package?.name||'Mata pelajaran belum tersedia'} · {r.status==='PUBLISHED'?'Dirilis':'Belum dirilis'}</p></div><b className="text-xl">{r.status==='PUBLISHED'?`${r.percentage}%`:'Belum tersedia'}</b></div></div>):<div className="p-10 text-center text-gray-500">Belum ada hasil ujian yang tersedia.</div>}</section>:<section><h2 className="text-xl font-bold text-gray-900 mb-3">Riwayat Ujian</h2>{schedules.length?schedules.map(s=><article key={s.id} className="bg-white border rounded-xl p-5 mb-3 flex flex-col md:flex-row md:items-center justify-between gap-4"><div><h3 className="font-bold text-gray-900">{s.name}</h3><p className="text-sm text-gray-500">{s.package?.name||'Mata pelajaran belum tersedia'} · {s.startTime?new Date(s.startTime).toLocaleString('id-ID'):'Waktu belum tersedia'}</p><p className="text-xs mt-2 text-gray-500">Status: {s.participant?.status||'Belum diikuti'}</p></div><button onClick={()=>begin(s)} disabled={!['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(String(s.status||s.publishStatus||'').toUpperCase())} className="px-4 py-2 bg-aksara-600 text-white rounded-lg disabled:opacity-50">{s.participant?.status==='SUBMITTED'?'Lihat Detail':'Mulai Bertahap'}</button></article>):<div className="bg-white border rounded-xl p-10 text-center text-gray-500">Belum ada jadwal ujian untuk sekolah dan kelas Anda.</div>}</section>}{stage==='detail'&&selected&&<div className="fixed inset-0 z-[999] bg-gray-900/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-lg"><p className="text-xs uppercase tracking-widest text-amber-600 font-bold">Detail Ujian → Biodata → Persetujuan → Token</p><h2 className="text-2xl font-bold mt-2">{selected.name}</h2><p className="text-gray-500 mt-2">{selected.package?.name||'Mata pelajaran belum tersedia'}</p><div className="flex justify-end gap-3 mt-6"><button onClick={()=>setStage('home')} className="px-4 py-2 bg-gray-100 rounded-lg">Kembali</button><button onClick={()=>setStage('consent')} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Lanjutkan</button></div></div></div>}{stage==='consent'&&selected&&<div className="fixed inset-0 z-[999] bg-gray-900/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-lg"><h2 className="text-xl font-bold">Persetujuan Memulai Ujian</h2><p className="text-sm text-gray-600 mt-3">Nama: {student?.name||'Belum tersedia'} · NISN: {student?.nisn||'Belum tersedia'}</p><label className="flex gap-2 mt-5 text-sm"><input type="checkbox" id="murid-consent"/> Saya menyetujui aturan ujian dan data saya sesuai.</label>{error&&<p className="text-sm text-red-600 mt-3">{error}</p>}<div className="flex justify-end gap-3 mt-6"><button onClick={()=>setStage('detail')} className="px-4 py-2 bg-gray-100 rounded-lg">Kembali</button><button onClick={()=>document.getElementById('murid-consent')?.checked?setStage('token'):setError('Persetujuan wajib dipilih.')} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Setuju dan Lanjut</button></div></div></div>}{stage==='token'&&selected&&<div className="fixed inset-0 z-[999] bg-gray-900/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-lg"><h2 className="text-xl font-bold">Masukkan TOKEN</h2><p className="text-sm text-gray-500 mt-2">TOKEN hanya diverifikasi untuk ujian dan akun murid ini.</p><input value={token} onChange={e=>{setToken(e.target.value);setError('')}} className="w-full border rounded-lg p-3 mt-5" placeholder="AKS-XXXXXX"/>{error&&<p className="text-sm text-red-600 mt-2">{error}</p>}<div className="flex justify-end gap-3 mt-6"><button onClick={()=>setStage('consent')} className="px-4 py-2 bg-gray-100 rounded-lg">Kembali</button><button onClick={validateToken} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Verifikasi dan Mulai</button></div></div></div>}</div>; };
+        const MuridDashboard = () => { const {user}=React.useContext(AppContext); const [stage,setStage]=React.useState('home'); const [selected,setSelected]=React.useState(null); const [token,setToken]=React.useState(''); const [error,setError]=React.useState(''); const [refreshing,setRefreshing]=React.useState(false); const [profileVersion,setProfileVersion]=React.useState(0); const [profileSyncError,setProfileSyncError]=React.useState(''); const student=getStudentProfile(user); const stableSchedulePredicate = React.useCallback(() => true, []); const scheduleSource=usePersistentSchedules(stableSchedulePredicate).items; React.useEffect(()=>{const refresh=()=>{try{readPersistentStudents();setProfileSyncError('')}catch(e){setProfileSyncError('Profil gagal disegarkan. Coba lagi.')}setProfileVersion(v=>v+1)}; const firebaseRefresh=event=>{const key=event?.detail?.key;if(!key||['students','schools','classes','examSchedules','examPackages','examParticipants'].includes(key))refresh()}; window.addEventListener('focus',refresh); window.addEventListener('aksara:schedules-changed',refresh); window.addEventListener('aksara:firebase-changed',firebaseRefresh); return()=>{window.removeEventListener('focus',refresh);window.removeEventListener('aksara:schedules-changed',refresh);window.removeEventListener('aksara:firebase-changed',firebaseRefresh)}},[user?.id]); const schedules=dedupeStudentSchedules(scheduleSource.filter(s=>{const participant=(DEMO_DB.examParticipants||[]).find(p=>String(p.scheduleId||p.examScheduleId)===String(s.id||s.scheduleId)&&[p.studentId,p.muridId,p.userId].some(v=>String(v??'')===String(student?.id||student?.studentId)));const targets=(s.targetClassIds||s.classIds||(s.classId?[s.classId]:[])).map(String);const classAllowed=String(s.targetScope||'').toLowerCase()==='all'||(!targets.length&&String(s.targetScope||'').toLowerCase()!=='manual')||targets.some(t=>sameClassIdentity(t,student?.classId||student?.kelasId||student?.className||student?.kelas));const status=String(s.status||s.publishStatus||s.publish_status||'').toUpperCase();const active=['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(status);const schoolAllowed=String(s.schoolScope||'').toLowerCase()==='all'||String(s.schoolId||'').toUpperCase()==='ALL'||!s.schoolId||sameSchoolIdentity(s.schoolId,student?.schoolId||student?.sekolahId)||sameSchoolIdentity(s.rawSchoolId,student?.schoolId||student?.sekolahId);return !!student&&String(student.status||'ACTIVE').toUpperCase()==='ACTIVE'&&!!student.schoolId&&!!student.classId&&schoolAllowed&&classAllowed&&(active||participant);}).map(s=>({...s,package:DEMO_DB.examPackages.find(p=>String(p.id||p.examId)===String(s.packageId||s.examId)),participant:DEMO_DB.examParticipants.find(p=>String(p.scheduleId||p.examScheduleId)===String(s.id||s.scheduleId)&&String(p.studentId||p.muridId)===String(student?.id||student?.studentId)),result:DEMO_DB.examResults.find(r=>String(r.scheduleId)===String(s.id||s.scheduleId)&&String(r.studentId)===String(student?.id||student?.studentId))}))).sort((a,b)=>new Date(a.startTime||0)-new Date(b.startTime||0)); const results=(DEMO_DB.examResults||[]).filter(r=>String(r.studentId)===String(student?.id)).map(r=>({...r,schedule:DEMO_DB.examSchedules.find(s=>s.id===r.scheduleId),package:DEMO_DB.examPackages.find(p=>p.id===DEMO_DB.examSchedules.find(s=>s.id===r.scheduleId)?.packageId)})).sort((a,b)=>new Date(b.submittedAt||b.publishedAt||0)-new Date(a.submittedAt||a.publishedAt||0)); const begin=s=>{setSelected(s);setStage('detail');setError('');}; const validateToken=()=>{const s=selected;const targets=(s?.targetClassIds||s?.classIds||(s?.classId?[s.classId]:[])).map(String);const classAllowed=String(s?.targetScope||'').toLowerCase()==='all'||(!targets.length&&String(s?.targetScope||'').toLowerCase()!=='manual')||targets.some(t=>sameClassIdentity(t,student?.classId||student?.kelasId||student?.className||student?.kelas));const status=['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(String(s?.status||s?.publishStatus||s?.publish_status||'').toUpperCase());const schoolAllowed=String(s?.schoolScope||'').toLowerCase()==='all'||String(s?.schoolId||'').toUpperCase()==='ALL'||!s?.schoolId||sameSchoolIdentity(s?.schoolId,student?.schoolId||student?.sekolahId)||sameSchoolIdentity(s?.rawSchoolId,student?.schoolId||student?.sekolahId);const ok=s&&status&&classAllowed&&schoolAllowed&&String(s.token||'').toUpperCase()===token.trim().toUpperCase();if(!ok)return setError('TOKEN salah, jadwal belum dibuka, atau tidak berlaku untuk akun ini.');setStage('exam');}; const refresh=()=>{setRefreshing(true);setTimeout(()=>setRefreshing(false),350);}; if(stage==='exam')return <ExamRoom scheduleId={selected.id}/>; const initials=(student?.name||user?.name||'?').split(' ').map(x=>x[0]).slice(0,2).join('').toUpperCase(); return <div className="space-y-6">{(profileSyncError||relationMessage(student))&&<div role="alert" className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4"><p className="font-semibold">Profil belum terhubung</p><p className="text-sm mt-1">{profileSyncError||relationMessage(student)}</p><button type="button" onClick={()=>{readPersistentStudents();setProfileVersion(v=>v+1)}} className="mt-3 px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-sm font-medium">Segarkan Profil</button></div>}<section className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 md:p-8"><div className="flex flex-col md:flex-row md:items-center gap-6"><div className="w-20 h-20 rounded-2xl bg-aksara-900 text-white flex items-center justify-center text-2xl font-bold shadow-lg">{initials}</div><div className="flex-1"><p className="text-xs uppercase tracking-[.2em] text-amber-600 font-bold">Profil Murid</p><h1 className="text-3xl font-heading font-bold text-gray-900 mt-1">{student?.name||user?.name||'Belum tersedia'}</h1><p className="text-gray-500 mt-2">{student?.nisn||'Belum tersedia'} · {user?.username||'Identitas akun belum tersedia'}</p><p className="text-sm text-gray-600 mt-1">Sekolah: {getSchoolName(student?.schoolId,student?.schoolName||student?.sekolahName)||'Sekolah belum tersedia'} · Kelas: {resolveClassDisplay(student?.classId||student?.kelasId||student?.className||student?.kelas,student?.schoolId)||'Kelas belum tersedia'}</p><p className="text-xs text-gray-400 mt-1">Kunci sekolah: {student?.schoolId||student?.sekolahId||'Belum diisi'} · Kunci kelas: {student?.classId||student?.kelasId||'Belum diisi'}</p></div><span className="px-3 py-1.5 rounded-full bg-teal-50 text-teal-700 text-sm font-semibold">{student?.status==='ACTIVE'?'Akun aktif':'Status belum tersedia'}</span></div><div className="grid grid-cols-2 gap-3 mt-6"><div className="bg-gray-50 rounded-xl p-4"><p className="text-xs text-gray-500">Ujian terjadwal</p><p className="text-2xl font-bold text-gray-900">{schedules.length}</p></div><div className="bg-gray-50 rounded-xl p-4"><p className="text-xs text-gray-500">Hasil tersedia</p><p className="text-2xl font-bold text-gray-900">{results.length}</p></div></div></section><div className="flex flex-wrap gap-2"><button onClick={()=>setStage('home')} className={`px-4 py-2 rounded-lg ${stage==='home'?'bg-aksara-900 text-white':'bg-white border'}`}>Riwayat Ujian</button><button onClick={()=>setStage('results')} className={`px-4 py-2 rounded-lg ${stage==='results'?'bg-aksara-900 text-white':'bg-white border'}`}>Hasil Ujian</button><button onClick={refresh} className="px-4 py-2 bg-white border rounded-lg">{refreshing?'Memuat...':'Refresh'}</button></div>{stage==='results'?<section className="bg-white rounded-xl border overflow-hidden"><div className="p-5 border-b"><h2 className="text-xl font-bold">Hasil Ujian</h2></div>{results.length?results.map(r=><div key={r.id} className="p-5 border-b last:border-0"><div className="flex justify-between gap-3"><div><h3 className="font-semibold">{r.schedule?.name||'Ujian belum tersedia'}</h3><p className="text-sm text-gray-500">{r.package?.name||'Mata pelajaran belum tersedia'} · {r.status==='PUBLISHED'?'Dirilis':'Belum dirilis'}</p></div><b className="text-xl">{r.status==='PUBLISHED'?`${r.percentage}%`:'Belum tersedia'}</b></div></div>):<div className="p-10 text-center text-gray-500">Belum ada hasil ujian yang tersedia.</div>}</section>:<section><h2 className="text-xl font-bold text-gray-900 mb-3">Riwayat Ujian</h2>{schedules.length?schedules.map(s=><article key={s.id} className="bg-white border rounded-xl p-5 mb-3 flex flex-col md:flex-row md:items-center justify-between gap-4"><div><h3 className="font-bold text-gray-900">{s.name}</h3><p className="text-sm text-gray-500">{s.package?.name||'Mata pelajaran belum tersedia'} · {s.startTime?new Date(s.startTime).toLocaleString('id-ID'):'Waktu belum tersedia'}</p><p className="text-xs mt-2 text-gray-500">Status: {s.participant?.status||'Belum diikuti'}</p></div><button onClick={()=>begin(s)} disabled={!['OPEN','PUBLISHED','ACTIVE','IN_PROGRESS'].includes(String(s.status||s.publishStatus||'').toUpperCase())} className="px-4 py-2 bg-aksara-600 text-white rounded-lg disabled:opacity-50">{s.participant?.status==='SUBMITTED'?'Lihat Detail':'Mulai Bertahap'}</button></article>):<div className="bg-white border rounded-xl p-10 text-center text-gray-500">Belum ada jadwal ujian untuk sekolah dan kelas Anda.</div>}</section>}{stage==='detail'&&selected&&<div className="fixed inset-0 z-[999] bg-gray-900/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-lg"><p className="text-xs uppercase tracking-widest text-amber-600 font-bold">Detail Ujian → Biodata → Persetujuan → Token</p><h2 className="text-2xl font-bold mt-2">{selected.name}</h2><p className="text-gray-500 mt-2">{selected.package?.name||'Mata pelajaran belum tersedia'}</p><div className="flex justify-end gap-3 mt-6"><button onClick={()=>setStage('home')} className="px-4 py-2 bg-gray-100 rounded-lg">Kembali</button><button onClick={()=>setStage('consent')} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Lanjutkan</button></div></div></div>}{stage==='consent'&&selected&&<div className="fixed inset-0 z-[999] bg-gray-900/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-lg"><h2 className="text-xl font-bold">Persetujuan Memulai Ujian</h2><p className="text-sm text-gray-600 mt-3">Nama: {student?.name||'Belum tersedia'} · NISN: {student?.nisn||'Belum tersedia'}</p><label className="flex gap-2 mt-5 text-sm"><input type="checkbox" id="murid-consent"/> Saya menyetujui aturan ujian dan data saya sesuai.</label>{error&&<p className="text-sm text-red-600 mt-3">{error}</p>}<div className="flex justify-end gap-3 mt-6"><button onClick={()=>setStage('detail')} className="px-4 py-2 bg-gray-100 rounded-lg">Kembali</button><button onClick={()=>document.getElementById('murid-consent')?.checked?setStage('token'):setError('Persetujuan wajib dipilih.')} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Setuju dan Lanjut</button></div></div></div>}{stage==='token'&&selected&&<div className="fixed inset-0 z-[999] bg-gray-900/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-lg"><h2 className="text-xl font-bold">Masukkan TOKEN</h2><p className="text-sm text-gray-500 mt-2">TOKEN hanya diverifikasi untuk ujian dan akun murid ini.</p><input value={token} onChange={e=>{setToken(e.target.value);setError('')}} className="w-full border rounded-lg p-3 mt-5" placeholder="AKS-XXXXXX"/>{error&&<p className="text-sm text-red-600 mt-2">{error}</p>}<div className="flex justify-end gap-3 mt-6"><button onClick={()=>setStage('consent')} className="px-4 py-2 bg-gray-100 rounded-lg">Kembali</button><button onClick={validateToken} className="px-4 py-2 bg-aksara-600 text-white rounded-lg">Verifikasi dan Mulai</button></div></div></div>}</div>; };
         const MuridRouter = ({ route }) => {
             if (route === 'murid/settings') return <AdminSettings />;
             if (route === 'murid/results') return <MuridResults />;
@@ -7569,15 +7633,15 @@ if ('serviceWorker' in navigator) {
                     {route === 'forgot-password' && <ForgotPasswordPage />}
                     
                     {route.startsWith('murid/exam-room/') ? (
-                        !user ? <ErrorState code={401} message="Sesi Anda telah berakhir." onBack={() => setRoute('login')} /> : <ExamRoom scheduleId={route.split('/')[2]} />
+                        !user ? <ErrorState code={401} message="Sesi Anda telah berakhir." onBack={() => setRoute('login')} /> : user.role !== 'MURID' ? <ErrorState code={403} message="Halaman ujian hanya dapat diakses oleh akun Murid." onBack={() => setRoute('login')} /> : <ExamRoom scheduleId={route.split('/')[2]} />
                     ) : route.includes('dashboard') || route.includes('admin/') || route.includes('guru/') || route.includes('orangtua/') || route.includes('murid/') ? (
                         !user ? <ErrorState code={401} message="Sesi Anda telah berakhir." onBack={() => setRoute('login')} /> : (
                             <DashboardLayout>
                                 {route.startsWith('admin/') && user.role === 'ADMIN_SUPER' && <AdminRouter route={route} />}
                                 {route.startsWith('guru/') && user.role === 'GURU' && <GuruRouter route={route} />}
                                 {route.startsWith('murid/') && user.role === 'MURID' && <MuridRouter route={route} />}
-                                {route === 'orangtua/settings' && <AdminSettings />}
-                                {route === 'orangtua/dashboard' && <OrangTuaDashboard />}
+                                {route.startsWith('orangtua/') && user.role === 'ORANG_TUA' && (route === 'orangtua/settings' ? <AdminSettings /> : route === 'orangtua/dashboard' ? <OrangTuaDashboard /> : <ErrorState code={403} message="Menu tidak tersedia untuk akun ini." onBack={() => setRoute('landing')} />)}
+                                {(route.startsWith('admin/') && user.role !== 'ADMIN_SUPER' || route.startsWith('guru/') && user.role !== 'GURU' || route.startsWith('murid/') && user.role !== 'MURID') && <ErrorState code={403} message="Akses menu ditolak untuk peran akun ini." onBack={() => setRoute('landing')} />}
                             </DashboardLayout>
                         )
                     ) : null}
