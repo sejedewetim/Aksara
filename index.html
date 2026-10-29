@@ -3785,12 +3785,27 @@ if ('serviceWorker' in navigator) {
             startExamAttempt: async (scheduleId, studentId) => {
                 return new Promise((resolve, reject) => {
                     setTimeout(() => {
-                        const schedule = DEMO_DB.examSchedules.find(s => s.id === scheduleId);
-                        const participant = DEMO_DB.examParticipants.find(p => p.scheduleId === scheduleId && p.studentId === studentId);
-                        const student = DEMO_DB.students.find(s => s.id === studentId);
-                        const targetIds = (schedule?.targetClassIds || schedule?.classIds || (schedule?.classId ? [schedule.classId] : [])).map(String);
-                        const classAllowed = schedule?.targetScope === 'all' || (!schedule?.targetScope && (!targetIds.length || targetIds.includes(String(student?.classId)))) || targetIds.includes(String(student?.classId));
-                        const schoolAllowed = !schedule?.schoolId || String(schedule.schoolId) === String(student?.schoolId);
+                        const schedule = DEMO_DB.examSchedules.find(s => String(s.id || s.scheduleId) === String(scheduleId));
+                        const participant = DEMO_DB.examParticipants.find(p => String(p.scheduleId || p.examScheduleId) === String(scheduleId) && String(p.studentId || p.muridId) === String(studentId));
+                        const student = DEMO_DB.students.find(s => String(s.id || s.studentId) === String(studentId)) || DEMO_DB.users.find(u => String(u.id || u.studentId || u.userId) === String(studentId) && String(u.role || '').toUpperCase() === 'MURID');
+                        const targetIds = (schedule?.targetClassIds || schedule?.classIds || (schedule?.classId ? [schedule.classId] : [])).map(String).filter(Boolean);
+                        const studentClassValues = [student?.classId, student?.kelasId, student?.class_id, student?.className, student?.kelas, student?.rombelId, student?.classroomId].filter(v => v !== undefined && v !== null && String(v).trim() !== '').map(String);
+                        const classValuesFor = (value, schoolId) => {
+                            const raw = String(value ?? '').trim(); if (!raw) return [];
+                            const classRows = typeof getRegisteredClasses === 'function' ? getRegisteredClasses() : (DEMO_DB.classes || []);
+                            const row = classRows.find(c => {
+                                const aliases = [c.id,c.classId,c.kelasId,c.class_id,c.rombelId,c.name,c.className,c.kelas].filter(v => v !== undefined && v !== null && String(v).trim() !== '').map(String);
+                                const match = aliases.some(v => v === raw || (typeof sameClassIdentity === 'function' && sameClassIdentity(v, raw)));
+                                const rowSchool = c.schoolId || c.sekolahId || c.school_id;
+                                return match && (!schoolId || !rowSchool || (typeof sameSchoolIdentity === 'function' ? sameSchoolIdentity(rowSchool, schoolId) : String(rowSchool) === String(schoolId)));
+                            });
+                            return [...new Set([raw, typeof normalizeStudentClassValue === 'function' ? normalizeStudentClassValue(raw) : raw, ...(row ? [row.id,row.classId,row.kelasId,row.class_id,row.rombelId,row.name,row.className,row.kelas] : [])].filter(v => v !== undefined && v !== null && String(v).trim() !== '').map(String))];
+                        };
+                        const studentClassAliases = [...new Set(studentClassValues.flatMap(v => classValuesFor(v, student?.schoolId || student?.sekolahId)))];
+                        const classAllowed = String(schedule?.targetScope || '').toLowerCase() === 'all' || (!targetIds.length && String(schedule?.targetScope || '').toLowerCase() !== 'manual') || targetIds.some(target => classValuesFor(target, schedule?.schoolId).some(alias => studentClassAliases.some(sv => sv === alias || (typeof sameClassIdentity === 'function' && sameClassIdentity(sv, alias)))));
+                        const studentSchoolId = student?.schoolId || student?.sekolahId || student?.school_id || '';
+                        const allSchoolScope = String(schedule?.schoolScope || '').toLowerCase() === 'all' || String(schedule?.schoolId || '').toUpperCase() === 'ALL' || (Array.isArray(schedule?.schoolIds) && schedule.schoolIds.some(v => String(v).toUpperCase() === 'ALL'));
+                        const schoolAllowed = allSchoolScope || !schedule?.schoolId || (!!studentSchoolId && (typeof sameSchoolIdentity === 'function' ? sameSchoolIdentity(schedule.schoolId, studentSchoolId) : String(schedule.schoolId) === String(studentSchoolId))) || (!!studentSchoolId && Array.isArray(schedule?.schoolIds) && schedule.schoolIds.some(v => typeof sameSchoolIdentity === 'function' ? sameSchoolIdentity(v, studentSchoolId) : String(v) === String(studentSchoolId)));
                         if (!schedule || !student || !classAllowed || !schoolAllowed) return reject({ message: 'Akses ujian ditolak. Jadwal tidak berlaku untuk sekolah atau kelas Anda.'});
                         if (schedule.status !== 'OPEN') return reject({ message: 'Ujian belum dibuka atau sudah ditutup.' });
 
@@ -4382,10 +4397,27 @@ if ('serviceWorker' in navigator) {
             }
         };
 
+        const aksaraExpectedFirebaseEmail = identifier => {
+            const raw = String(identifier || '').trim().toLowerCase();
+            return raw.includes('@') ? raw : `${raw.replace(/[^a-z0-9._-]/g,'_')}@login.aksara.id`;
+        };
+        const aksaraFirebaseSessionMatches = identifier => {
+            const current = AKSARA_FIREBASE.auth?.currentUser;
+            return !!current && String(current.email || '').trim().toLowerCase() === aksaraExpectedFirebaseEmail(identifier).toLowerCase();
+        };
+        const aksaraRequireFirebaseSession = async (identifier, password, localUser) => {
+            await aksaraFbLoginAfterLocal(identifier, password, localUser);
+            if (!aksaraFirebaseSessionMatches(identifier)) {
+                throw new Error('Akun lokal ditemukan, tetapi sesi Firebase belum aktif. Sinkronisasi jadwal membutuhkan login Firebase yang sesuai. Pastikan akun dan kata sandi Firebase Authentication cocok, lalu masuk kembali.');
+            }
+            return AKSARA_FIREBASE.auth.currentUser;
+        };
         mockApiService.login = async (identifier, password) => {
-            // 1. Gunakan password yang memang tersimpan pada data akun lama.
+            // Login lokal tidak boleh melewati Firebase Authentication. Tanpa sesi Firebase,
+            // penulisan jadwal akan ditolak oleh Realtime Database dengan PERMISSION_DENIED.
             const resolved = aksaraResolveStoredAccount(identifier, password);
             if (resolved) {
+                await aksaraRequireFirebaseSession(identifier, password, resolved);
                 const token = btoa(JSON.stringify({ userId: resolved.id, role: resolved.role, timestamp: Date.now() }));
                 return { success:true, data:{ token, user:resolved }, message:'Login berhasil' };
             }
@@ -4407,10 +4439,9 @@ if ('serviceWorker' in navigator) {
                 result = { success:true, data:{ token:btoa(JSON.stringify({ userId:fallback.id, role:fallback.role, timestamp:Date.now() })), user:fallback }, message:'Login berhasil' };
             }
             if (result && result.success && result.data && result.data.user) {
-                Promise.race([
-                    aksaraFbLoginAfterLocal(identifier, password, result.data.user),
-                    new Promise(resolve => setTimeout(resolve, 3000))
-                ]).catch(() => null);
+                // Tunggu autentikasi cloud selesai sebelum menampilkan aplikasi. Tidak lagi
+                // membiarkan UI masuk lebih dahulu sementara operasi Firebase masih berjalan.
+                await aksaraRequireFirebaseSession(identifier, password, result.data.user);
             }
             return result;
         };
@@ -6981,23 +7012,31 @@ if ('serviceWorker' in navigator) {
                     updatedAt:now
                 };
                 try {
-                    // Simpan ke cache lokal terlebih dahulu agar popup tidak menunggu Firebase/Canva.
                     const saved = normalizeScheduleRecord(next);
+                    const scheduleId = String(saved.scheduleId || saved.id || '').trim();
+                    if (!scheduleId) throw new Error('ID jadwal tidak valid. Silakan coba simpan kembali.');
+                    await aksaraFbReady();
+                    if (!AKSARA_FIREBASE.auth?.currentUser || !aksaraFirebaseSessionMatches(AKSARA_FIREBASE.auth.currentUser.email || '')) {
+                        throw new Error('Sesi Firebase belum aktif. Keluar dari AKSARA, lalu masuk kembali dengan akun Admin Super agar jadwal dapat disimpan.');
+                    }
+                    // Simpan ke cloud terlebih dahulu. Jangan menampilkan jadwal seolah berhasil
+                    // jika Firebase menolak penulisan, agar jadwal lokal semu tidak lolos ke akun Murid.
+                    await AKSARA_FIREBASE.db.ref('examSchedules').child(scheduleId).set(aksaraFbSafe(saved));
                     const data = editing.id ? items.map(x => String(x.id || x.scheduleId) === String(saved.id || saved.scheduleId) ? saved : x) : [...items.filter(x => String(x.scheduleId || x.id) !== String(saved.scheduleId)), saved];
                     DEMO_DB.examSchedules = mergeLatestSchedules(data);
                     try { const serialized = JSON.stringify(DEMO_DB.examSchedules); localStorage.setItem('aksara_examSchedules', serialized); localStorage.setItem('master_examSchedules', serialized); localStorage.setItem('aksara_firebase_examSchedules', serialized); } catch(e) {}
                     setItems([...DEMO_DB.examSchedules]);
-                    // Upsert hanya record yang diedit/dibuat. Hindari .set() pada seluruh
-                    // koleksi yang dapat menimpa jadwal baru dari perangkat lain.
-                    await aksaraFbReady();
-                    await AKSARA_FIREBASE.db.ref('examSchedules').child(String(saved.scheduleId || saved.id)).set(aksaraFbSafe(saved));
                     setEditing(null);
                     setSaving(false);
                     setNotice('Jadwal ujian berhasil disimpan ke Firebase.');
                     window.dispatchEvent(new CustomEvent('aksara:schedules-changed'));
                     try { await ensureScheduleSdk(); } catch(e) {}
                 } catch (err) {
-                    setError(err?.message || 'Jadwal gagal disimpan.');
+                    console.warn('[AKSARA] Simpan jadwal gagal', err);
+                    const rawMessage = String(err?.message || 'Jadwal gagal disimpan.');
+                    setError(/PERMISSION_DENIED|permission denied/i.test(rawMessage)
+                        ? 'Firebase menolak penyimpanan jadwal (PERMISSION_DENIED). Pastikan akun Admin Super sudah terautentikasi di Firebase Authentication dan aturan Realtime Database mengizinkan Admin Super menulis ke /examSchedules.'
+                        : rawMessage);
                     setSaving(false);
                 }
             };
