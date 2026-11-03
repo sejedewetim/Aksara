@@ -563,6 +563,7 @@ var DEMO_DB = {
                 });
                 window.dispatchEvent(new CustomEvent('aksara:firebase-status',{detail:{connected:true}}));
             } catch(e) {
+                AKSARA_FIREBASE.started = false;
                 console.warn('[AKSARA Firebase]',e);
                 window.dispatchEvent(new CustomEvent('aksara:firebase-status',{detail:{connected:false,error:e.message}}));
             }
@@ -3304,8 +3305,11 @@ var App = function App() {
     route: route
   }), route.startsWith('orangtua/') && /*#__PURE__*/React.createElement(OrangTuaDashboard, null)) : null);
 };
-var root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(/*#__PURE__*/React.createElement(App, null));
+// Salinan terkompilasi di HEAD tidak boleh melakukan mount sebelum elemen #root tersedia.
+if (document.getElementById('root')) {
+  var root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(/*#__PURE__*/React.createElement(App, null));
+}
 
 // Dummy Service Worker Registration for PWA Installation Capability
 if ('serviceWorker' in navigator) {
@@ -4236,8 +4240,13 @@ if ('serviceWorker' in navigator) {
         const aksaraFbLoginAfterLocal = async (identifier, password, localUser) => {
             try {
                 await aksaraFbReady();
+                // Sesi Firebase dipertahankan setelah refresh pada browser/perangkat yang sama.
+                try { await AKSARA_FIREBASE.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); } catch (persistenceError) {
+                    console.warn('[AKSARA Firebase] Gagal mengatur persistensi sesi:', persistenceError);
+                }
                 const raw = String(identifier || '').trim().toLowerCase();
-                const email = raw.includes('@') ? raw : `${raw.replace(/[^a-z0-9._-]/g,'_')}@login.aksara.id`;
+                const registeredEmail = String(localUser?.email || '').trim().toLowerCase();
+                const email = raw.includes('@') ? raw : (registeredEmail || `${raw.replace(/[^a-z0-9._-]/g,'_')}@login.aksara.id`);
                 let cred;
                 try {
                     cred = await AKSARA_FIREBASE.auth.signInWithEmailAndPassword(email, String(password || ''));
@@ -4386,6 +4395,13 @@ if ('serviceWorker' in navigator) {
             // 1. Gunakan password yang memang tersimpan pada data akun lama.
             const resolved = aksaraResolveStoredAccount(identifier, password);
             if (resolved) {
+                // Autentikasi Firebase harus aktif sebelum aplikasi membaca/menulis data cloud.
+                try {
+                    const firebaseUser = await aksaraFbLoginAfterLocal(identifier, password, resolved);
+                    if (!firebaseUser) console.error('[AKSARA SYNC] Login lokal berhasil, tetapi autentikasi Firebase belum berhasil. Sinkronisasi cloud belum aktif.');
+                } catch (firebaseError) {
+                    console.error('[AKSARA SYNC] Gagal mengaktifkan Firebase saat login:', firebaseError);
+                }
                 const token = btoa(JSON.stringify({ userId: resolved.id, role: resolved.role, timestamp: Date.now() }));
                 return { success:true, data:{ token, user:resolved }, message:'Login berhasil' };
             }
