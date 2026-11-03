@@ -563,7 +563,6 @@ var DEMO_DB = {
                 });
                 window.dispatchEvent(new CustomEvent('aksara:firebase-status',{detail:{connected:true}}));
             } catch(e) {
-                AKSARA_FIREBASE.started = false;
                 console.warn('[AKSARA Firebase]',e);
                 window.dispatchEvent(new CustomEvent('aksara:firebase-status',{detail:{connected:false,error:e.message}}));
             }
@@ -3305,11 +3304,8 @@ var App = function App() {
     route: route
   }), route.startsWith('orangtua/') && /*#__PURE__*/React.createElement(OrangTuaDashboard, null)) : null);
 };
-// Salinan terkompilasi di HEAD tidak boleh melakukan mount sebelum elemen #root tersedia.
-if (document.getElementById('root')) {
-  var root = ReactDOM.createRoot(document.getElementById('root'));
-  root.render(/*#__PURE__*/React.createElement(App, null));
-}
+var root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(/*#__PURE__*/React.createElement(App, null));
 
 // Dummy Service Worker Registration for PWA Installation Capability
 if ('serviceWorker' in navigator) {
@@ -4240,13 +4236,8 @@ if ('serviceWorker' in navigator) {
         const aksaraFbLoginAfterLocal = async (identifier, password, localUser) => {
             try {
                 await aksaraFbReady();
-                // Sesi Firebase dipertahankan setelah refresh pada browser/perangkat yang sama.
-                try { await AKSARA_FIREBASE.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); } catch (persistenceError) {
-                    console.warn('[AKSARA Firebase] Gagal mengatur persistensi sesi:', persistenceError);
-                }
                 const raw = String(identifier || '').trim().toLowerCase();
-                const registeredEmail = String(localUser?.email || '').trim().toLowerCase();
-                const email = raw.includes('@') ? raw : (registeredEmail || `${raw.replace(/[^a-z0-9._-]/g,'_')}@login.aksara.id`);
+                const email = raw.includes('@') ? raw : `${raw.replace(/[^a-z0-9._-]/g,'_')}@login.aksara.id`;
                 let cred;
                 try {
                     cred = await AKSARA_FIREBASE.auth.signInWithEmailAndPassword(email, String(password || ''));
@@ -4395,13 +4386,6 @@ if ('serviceWorker' in navigator) {
             // 1. Gunakan password yang memang tersimpan pada data akun lama.
             const resolved = aksaraResolveStoredAccount(identifier, password);
             if (resolved) {
-                // Autentikasi Firebase harus aktif sebelum aplikasi membaca/menulis data cloud.
-                try {
-                    const firebaseUser = await aksaraFbLoginAfterLocal(identifier, password, resolved);
-                    if (!firebaseUser) console.error('[AKSARA SYNC] Login lokal berhasil, tetapi autentikasi Firebase belum berhasil. Sinkronisasi cloud belum aktif.');
-                } catch (firebaseError) {
-                    console.error('[AKSARA SYNC] Gagal mengaktifkan Firebase saat login:', firebaseError);
-                }
                 const token = btoa(JSON.stringify({ userId: resolved.id, role: resolved.role, timestamp: Date.now() }));
                 return { success:true, data:{ token, user:resolved }, message:'Login berhasil' };
             }
@@ -4439,6 +4423,48 @@ if ('serviceWorker' in navigator) {
             const [showPassword, setShowPassword] = React.useState(false);
             const [error, setError] = React.useState('');
             const [loading, setLoading] = React.useState(false);
+            const [showFirebaseSettings, setShowFirebaseSettings] = React.useState(false);
+            const [firebaseEmail, setFirebaseEmail] = React.useState('');
+            const [firebasePassword, setFirebasePassword] = React.useState('');
+            const [firebaseBusy, setFirebaseBusy] = React.useState(false);
+            const [firebaseMessage, setFirebaseMessage] = React.useState('');
+            const [firebaseConnectedEmail, setFirebaseConnectedEmail] = React.useState('');
+
+            React.useEffect(() => {
+                let active = true;
+                aksaraFbReady().then(() => {
+                    if (active && AKSARA_FIREBASE.auth?.currentUser) {
+                        setFirebaseConnectedEmail(AKSARA_FIREBASE.auth.currentUser.email || 'Akun Firebase terhubung');
+                    }
+                }).catch(() => {});
+                return () => { active = false; };
+            }, []);
+
+            const connectFirebaseAccount = async (e) => {
+                e.preventDefault();
+                setFirebaseMessage('');
+                const email = String(firebaseEmail || '').trim();
+                if (!email || !email.includes('@')) return setFirebaseMessage('Masukkan alamat email Firebase yang valid.');
+                if (!firebasePassword) return setFirebaseMessage('Masukkan password akun Firebase.');
+                setFirebaseBusy(true);
+                try {
+                    await aksaraFbReady();
+                    const credential = await AKSARA_FIREBASE.auth.signInWithEmailAndPassword(email, firebasePassword);
+                    setFirebaseConnectedEmail(credential.user.email || email);
+                    setFirebasePassword('');
+                    await aksaraFbStart();
+                    setFirebaseMessage('Akun terhubung. Sinkronisasi realtime Firebase telah diaktifkan pada perangkat ini.');
+                    window.dispatchEvent(new CustomEvent('aksara:firebase-status', {detail:{connected:true, email:credential.user.email || email}}));
+                } catch (err) {
+                    const code = err?.code || '';
+                    const message = code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found'
+                        ? 'Email atau password Firebase tidak sesuai. Pastikan akun sudah dibuat di Firebase Authentication.'
+                        : code === 'auth/operation-not-allowed'
+                            ? 'Metode Email/Password belum diaktifkan di Firebase Console → Authentication → Sign-in method.'
+                            : (err?.message || 'Gagal menghubungkan akun Firebase. Periksa koneksi dan konfigurasi Firebase.');
+                    setFirebaseMessage(message);
+                } finally { setFirebaseBusy(false); }
+            };
 
             const handleLogin = async (e) => {
                 e.preventDefault();
@@ -4458,7 +4484,35 @@ if ('serviceWorker' in navigator) {
             };
 
             return (
-                <div className="min-h-screen flex bg-gray-50 login-shell" style={{background: landing.gradient ? `linear-gradient(135deg, ${landing.primary}, ${landing.secondary})` : landing.primary}}>
+                <div className="min-h-screen flex bg-gray-50 login-shell relative" style={{background: landing.gradient ? `linear-gradient(135deg, ${landing.primary}, ${landing.secondary})` : landing.primary}}>
+                    <div className="absolute top-4 right-4 z-30">
+                        <button type="button" onClick={() => { setFirebaseMessage(''); setShowFirebaseSettings(true); }} className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white/95 px-3 py-2 text-sm font-semibold text-gray-700 shadow-md hover:bg-white" aria-label="Pengaturan sinkronisasi Firebase">
+                            <Icon name="settings" className="w-4 h-4" /> <span className="hidden sm:inline">Sinkronisasi Multi-Perangkat</span><span className="sm:hidden">Firebase</span>
+                            <span className={`inline-block w-2 h-2 rounded-full ${firebaseConnectedEmail ? 'bg-emerald-500' : 'bg-gray-400'}`}></span>
+                        </button>
+                    </div>
+                    {showFirebaseSettings && <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-gray-950/60 p-4" role="dialog" aria-modal="true" aria-labelledby="firebase-settings-title" onMouseDown={e => { if (e.target === e.currentTarget && !firebaseBusy) setShowFirebaseSettings(false); }}>
+                        <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+                            <div className="flex items-start justify-between border-b bg-gray-50 p-5">
+                                <div><h2 id="firebase-settings-title" className="text-lg font-bold text-gray-900">Sinkronisasi Multi-Perangkat</h2><p className="mt-1 text-xs text-gray-500">Hubungkan akun Firebase sebelum masuk ke akun AKSARA.</p></div>
+                                <button type="button" disabled={firebaseBusy} onClick={() => setShowFirebaseSettings(false)} className="rounded-lg px-2 text-2xl leading-none text-gray-400 hover:bg-gray-200" aria-label="Tutup">×</button>
+                            </div>
+                            <div className="space-y-4 p-5">
+                                <div className={`rounded-xl border p-3 ${firebaseConnectedEmail ? 'border-emerald-200 bg-emerald-50' : 'border-gray-200 bg-gray-50'}`}>
+                                    <div className={`flex items-center gap-2 text-sm font-semibold ${firebaseConnectedEmail ? 'text-emerald-800' : 'text-gray-700'}`}><span className={`inline-block h-2.5 w-2.5 rounded-full ${firebaseConnectedEmail ? 'bg-emerald-500' : 'bg-gray-400'}`}></span>{firebaseConnectedEmail ? 'Akun Firebase terhubung' : 'Belum terhubung'}</div>
+                                    <p className="mt-1 break-all text-xs text-gray-600">{firebaseConnectedEmail || 'Masuk menggunakan akun Email/Password Firebase yang sama pada setiap perangkat.'}</p>
+                                </div>
+                                <form onSubmit={connectFirebaseAccount} className="space-y-3">
+                                    <label className="block text-sm font-medium text-gray-700">Email Firebase<input type="email" autoComplete="username" required value={firebaseEmail} onChange={e => setFirebaseEmail(e.target.value)} placeholder="nama@email.com" className="mt-1 w-full rounded-lg border border-gray-300 p-3 focus:border-aksara-600 focus:outline-none focus:ring-2 focus:ring-indigo-100" disabled={firebaseBusy}/></label>
+                                    <label className="block text-sm font-medium text-gray-700">Password Firebase<input type="password" autoComplete="current-password" required value={firebasePassword} onChange={e => setFirebasePassword(e.target.value)} placeholder="Password akun Firebase" className="mt-1 w-full rounded-lg border border-gray-300 p-3 focus:border-aksara-600 focus:outline-none focus:ring-2 focus:ring-indigo-100" disabled={firebaseBusy}/></label>
+                                    {firebaseMessage && <div role="status" className={`rounded-lg border p-3 text-sm ${firebaseMessage.startsWith('Akun terhubung') ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{firebaseMessage}</div>}
+                                    <button type="submit" disabled={firebaseBusy} className="flex w-full items-center justify-center gap-2 rounded-lg bg-aksara-600 px-4 py-3 font-semibold text-white hover:bg-aksara-900 disabled:opacity-60"><Icon name={firebaseBusy ? 'loader-2' : 'cloud'} className={`h-4 w-4 ${firebaseBusy ? 'animate-spin' : ''}`}/>{firebaseBusy ? 'Menghubungkan...' : 'Hubungkan & Sinkronkan'}</button>
+                                </form>
+                                <div className="rounded-lg bg-amber-50 p-3 text-xs leading-relaxed text-amber-900"><b>Catatan:</b> gunakan akun yang sudah terdaftar pada Firebase Console → Authentication → Users. Aktifkan Email/Password pada Sign-in method. Semua perangkat harus menggunakan proyek Firebase dan akun yang sama; aturan Realtime Database harus mengizinkan akses untuk pengguna yang sudah login.</div>
+                                <p className="text-center text-[11px] text-gray-400">Password hanya dikirim ke Firebase Authentication dan tidak disimpan oleh formulir ini.</p>
+                            </div>
+                        </div>
+                    </div>}
                     <div className="hidden md:flex md:w-1/2 bg-aksara-900 relative overflow-hidden items-center justify-center p-12">
                         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: "url('data:image/svg+xml,%3Csvg width=%2260%22 height=%2260%22 viewBox=%220 0 60 60%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cg fill=%22none%22 fill-rule=%22evenodd%22%3E%3Cg fill=%22%23ffffff%22 fill-opacity=%221%22%3E%3Cpath d=%22M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')" }}></div>
                         
